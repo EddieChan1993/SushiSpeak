@@ -1,16 +1,43 @@
 import Foundation
 import AVFoundation
 import CoreMedia
+import Speech
+
+enum AudioFormat: String, CaseIterable {
+    case mp3 = "MP3"
+    case m4a = "M4A"
+    case wav = "WAV"
+
+    var fileExtension: String { rawValue.lowercased() }
+    var color: String {
+        switch self {
+        case .mp3: return "blue"
+        case .m4a: return "purple"
+        case .wav: return "green"
+        }
+    }
+}
 
 class AudioRecorder: NSObject, ObservableObject {
     @Published var recordings: [Recording] = []
     @Published var audioLevel: Float = 0
+
+    var preferredFormat: AudioFormat = .mp3
 
     private var engine: AVAudioEngine?
     private var booster: AVAudioMixerNode?
     private var audioFile: AVAudioFile?
     private var currentURL: URL?
     private var startTime: Date?
+
+    private var ffmpegPath: String? {
+        if let execURL = Bundle.main.executableURL {
+            let bundled = execURL.deletingLastPathComponent().appendingPathComponent("ffmpeg").path
+            if FileManager.default.fileExists(atPath: bundled) { return bundled }
+        }
+        return ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+            .first { FileManager.default.fileExists(atPath: $0) }
+    }
 
     private var storageDir: URL {
         let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -33,7 +60,7 @@ class AudioRecorder: NSObject, ObservableObject {
 
     private func makeAudioFile(sampleRate: Double) -> (AVAudioFile, URL)? {
         let ts = Int(Date().timeIntervalSince1970)
-        // Record as M4A (reliable), convert to MP3 after stopping
+        // Always record as M4A; convert to target format after stopping
         let url = storageDir.appendingPathComponent("rec_\(ts).m4a")
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -101,27 +128,29 @@ class AudioRecorder: NSObject, ObservableObject {
         currentURL = nil
         startTime = nil
 
-        // Try to convert M4A → MP3 in background
+        let targetFormat = preferredFormat
         Task {
-            let finalURL = await convertToMP3(from: sourceURL)
+            let finalURL = await convert(from: sourceURL, to: targetFormat)
             let rec = Recording(id: UUID(), url: finalURL, date: date, duration: duration)
             await MainActor.run { recordings.insert(rec, at: 0) }
         }
     }
 
-    // MARK: - MP3 conversion via lame or ffmpeg
+    // MARK: - Format conversion via bundled/system ffmpeg
 
-    private func convertToMP3(from sourceURL: URL) async -> URL {
-        let mp3URL = sourceURL.deletingPathExtension().appendingPathExtension("mp3")
+    private func convert(from sourceURL: URL, to format: AudioFormat) async -> URL {
+        if format == .m4a { return sourceURL }
 
-        let ffmpegPaths = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
-        guard let ffmpeg = ffmpegPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
-            return sourceURL // ffmpeg not found, keep M4A
-        }
+        guard let ffmpeg = ffmpegPath else { return sourceURL }
+
+        let outURL = sourceURL.deletingPathExtension().appendingPathExtension(format.fileExtension)
+        var args = ["-y", "-i", sourceURL.path]
+        if format == .mp3 { args += ["-q:a", "2"] }
+        args.append(outURL.path)
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: ffmpeg)
-        proc.arguments = ["-y", "-i", sourceURL.path, "-q:a", "2", mp3URL.path]
+        proc.arguments = args
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError  = FileHandle.nullDevice
 
@@ -129,13 +158,39 @@ class AudioRecorder: NSObject, ObservableObject {
             try proc.run()
             proc.waitUntilExit()
             if proc.terminationStatus == 0,
-               FileManager.default.fileExists(atPath: mp3URL.path) {
+               FileManager.default.fileExists(atPath: outURL.path) {
                 try? FileManager.default.removeItem(at: sourceURL)
-                return mp3URL
+                return outURL
             }
         } catch {}
 
         return sourceURL
+    }
+
+    // MARK: - Speech transcription
+
+    func transcribe(_ recording: Recording, completion: @escaping (String?) -> Void) {
+        SFSpeechRecognizer.requestAuthorization { status in
+            guard status == .authorized else {
+                completion(nil)
+                return
+            }
+            let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
+                ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+            guard let recognizer, recognizer.isAvailable else {
+                completion(nil)
+                return
+            }
+            let request = SFSpeechURLRecognitionRequest(url: recording.url)
+            request.requiresOnDeviceRecognition = false
+            recognizer.recognitionTask(with: request) { result, error in
+                if let result, result.isFinal {
+                    completion(result.bestTranscription.formattedString)
+                } else if error != nil {
+                    completion(nil)
+                }
+            }
+        }
     }
 
     func delete(_ recording: Recording) {

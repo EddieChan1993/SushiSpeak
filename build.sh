@@ -2,10 +2,18 @@
 set -e
 
 APP_NAME="SushiSpeak"
-BUILD_TYPE="${1:-release}"
 BUILD_DIR=".build"
+DEV_MODE=false
 
-echo "🍣 Building $APP_NAME ($BUILD_TYPE)..."
+# -d flag = development mode (debug build, use system tools, no bundling)
+if [[ "$1" == "-d" ]]; then
+    DEV_MODE=true
+    BUILD_TYPE="debug"
+else
+    BUILD_TYPE="release"
+fi
+
+echo "🍣 Building $APP_NAME ($BUILD_TYPE, dev=$DEV_MODE)..."
 
 # Kill any running instance
 if pgrep -x "$APP_NAME" > /dev/null; then
@@ -23,11 +31,9 @@ CONTENTS="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS/MacOS"
 RESOURCES_DIR="$CONTENTS/Resources"
 
-# Create bundle structure
 rm -rf "$APP_BUNDLE"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-# Copy binary
 cp "$BUILD_DIR/$BUILD_TYPE/$APP_NAME" "$MACOS_DIR/$APP_NAME"
 
 # Write Info.plist
@@ -54,19 +60,19 @@ cat > "$CONTENTS/Info.plist" << 'PLIST'
     <string>13.0</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>SushiSpeak needs microphone access to record your speaking practice sessions.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>SushiSpeak uses speech recognition to transcribe your recordings.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
-    <key>NSUserNotificationAlertStyle</key>
-    <string>alert</string>
 </dict>
 </plist>
 PLIST
 
-# Write entitlements (microphone access, no sandbox for ad-hoc)
+# Write entitlements
 cat > "$BUILD_DIR/$APP_NAME.entitlements" << 'ENT'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -80,7 +86,20 @@ cat > "$BUILD_DIR/$APP_NAME.entitlements" << 'ENT'
 </plist>
 ENT
 
-# Ad-hoc code sign with entitlements
+# Production: bundle ffmpeg so the app works on machines without Homebrew
+if [ "$DEV_MODE" = false ]; then
+    FFMPEG_SRC=""
+    for p in /opt/homebrew/bin/ffmpeg /usr/local/bin/ffmpeg; do
+        if [ -f "$p" ]; then FFMPEG_SRC="$p"; break; fi
+    done
+    if [ -n "$FFMPEG_SRC" ]; then
+        cp "$FFMPEG_SRC" "$MACOS_DIR/ffmpeg"
+        echo "  Bundled: ffmpeg ($(du -sh "$MACOS_DIR/ffmpeg" | cut -f1))"
+    else
+        echo "  ⚠️  ffmpeg not found — MP3 conversion unavailable"
+    fi
+fi
+
 codesign \
     --force \
     --deep \

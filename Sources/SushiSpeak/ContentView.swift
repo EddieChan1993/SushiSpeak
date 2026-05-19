@@ -7,11 +7,16 @@ struct ContentView: View {
     @StateObject private var recorder = AudioRecorder()
     @AppStorage("lastMinutes") private var selectedMinutes = 5
     @AppStorage("lastSeconds") private var selectedSeconds = 0
+    @AppStorage("audioFormat") private var audioFormatRaw = AudioFormat.mp3.rawValue
     @State private var timeRemaining = 0
     @State private var isRunning = false
     @State private var timerTask: Task<Void, Never>?
     @State private var startHovered = false
     @State private var showDeleteConfirm = false
+
+    var selectedFormat: AudioFormat {
+        AudioFormat(rawValue: audioFormatRaw) ?? .mp3
+    }
 
     var totalSeconds: Int { selectedMinutes * 60 + selectedSeconds }
 
@@ -28,7 +33,13 @@ struct ContentView: View {
             recordingsPanel
         }
         .frame(minWidth: 360, minHeight: 520)
-        .onAppear { timeRemaining = totalSeconds }
+        .onAppear {
+            timeRemaining = totalSeconds
+            recorder.preferredFormat = selectedFormat
+        }
+        .onChange(of: audioFormatRaw) { _ in
+            recorder.preferredFormat = selectedFormat
+        }
         .onDisappear {
             timerTask?.cancel()
             if isRunning { recorder.stopRecording() }
@@ -90,6 +101,16 @@ struct ContentView: View {
                     .onChange(of: selectedSeconds) { _ in
                         timeRemaining = totalSeconds
                     }
+
+                    Divider().frame(height: 20)
+
+                    Picker("", selection: $audioFormatRaw) {
+                        ForEach(AudioFormat.allCases, id: \.rawValue) {
+                            Text($0.rawValue).tag($0.rawValue)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 64)
                 }
                 .opacity(isRunning ? 0 : 1)
                 .disabled(isRunning)
@@ -160,6 +181,7 @@ struct ContentView: View {
                     List(recorder.recordings) { rec in
                         RecordingRow(
                             recording: rec,
+                            recorder: recorder,
                             onDelete: { recorder.delete(rec) }
                         )
                         .listRowInsets(EdgeInsets())
@@ -276,16 +298,30 @@ struct RecordingBadge: View {
 
 struct RecordingRow: View {
     let recording: Recording
+    let recorder: AudioRecorder
     let onDelete: () -> Void
 
     @State private var player: AVAudioPlayer?
     @State private var isPlaying = false
     @State private var isHovered = false
     @State private var folderHovered = false
-    @State private var dupHovered = false
-    @State private var dupConfirmed = false
+    @State private var transcribeHovered = false
+    @State private var transcribeState: TranscribeState = .idle
     @State private var deleteHovered = false
     @State private var showDeleteConfirm = false
+
+    enum TranscribeState {
+        case idle, loading, done, failed
+    }
+
+    var formatBadgeColor: Color {
+        switch recording.url.pathExtension.lowercased() {
+        case "mp3": return .blue
+        case "m4a": return .purple
+        case "wav": return .green
+        default: return .gray
+        }
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -301,9 +337,18 @@ struct RecordingRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(recording.formattedDate)
                     .font(.system(size: 13, weight: .medium))
-                Text(recording.formattedDuration)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Text(recording.formattedDuration)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Text(recording.url.pathExtension.uppercased())
+                        .font(.system(size: 9, weight: .semibold))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(formatBadgeColor.opacity(0.15))
+                        .foregroundStyle(formatBadgeColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
             }
 
             Spacer()
@@ -318,16 +363,33 @@ struct RecordingRow: View {
             .help("Show in Finder")
             .onHover { folderHovered = $0 }
 
-            Button { copyToClipboard() } label: {
-                Image(systemName: dupConfirmed ? "checkmark" : "doc.on.doc")
-                    .foregroundStyle(dupConfirmed ? Color.green : (dupHovered ? Color.accentColor : Color.secondary))
-                    .scaleEffect(dupHovered ? 1.15 : 1.0)
-                    .animation(.spring(response: 0.15), value: dupHovered)
-                    .animation(.spring(response: 0.15), value: dupConfirmed)
+            Button { transcribeAndCopy() } label: {
+                Group {
+                    switch transcribeState {
+                    case .idle:
+                        Image(systemName: "waveform.and.mic")
+                    case .loading:
+                        ProgressView().controlSize(.mini)
+                    case .done:
+                        Image(systemName: "checkmark")
+                    case .failed:
+                        Image(systemName: "xmark")
+                    }
+                }
+                .foregroundStyle(
+                    transcribeState == .done ? Color.green :
+                    transcribeState == .failed ? Color.red :
+                    transcribeHovered ? Color.accentColor : Color.secondary
+                )
+                .scaleEffect(transcribeHovered ? 1.15 : 1.0)
+                .animation(.spring(response: 0.15), value: transcribeHovered)
+                .animation(.spring(response: 0.15), value: transcribeState)
+                .frame(width: 16)
             }
             .buttonStyle(.plain)
-            .help("Copy audio file to clipboard")
-            .onHover { dupHovered = $0 }
+            .help("Transcribe and copy text to clipboard")
+            .onHover { transcribeHovered = $0 }
+            .disabled(transcribeState == .loading)
 
             Button { showDeleteConfirm = true } label: {
                 Image(systemName: "trash")
@@ -351,11 +413,22 @@ struct RecordingRow: View {
         NSWorkspace.shared.activateFileViewerSelecting([recording.url])
     }
 
-    func copyToClipboard() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.writeObjects([recording.url as NSURL])
-        dupConfirmed = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { dupConfirmed = false }
+    func transcribeAndCopy() {
+        transcribeState = .loading
+        recorder.transcribe(recording) { text in
+            DispatchQueue.main.async {
+                if let text, !text.isEmpty {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                    transcribeState = .done
+                } else {
+                    transcribeState = .failed
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    transcribeState = .idle
+                }
+            }
+        }
     }
 
     func togglePlay() {
