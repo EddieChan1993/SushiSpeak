@@ -203,11 +203,10 @@ struct ContentView: View {
     }
 
     func sendCompletionNotification() {
-        let n = NSUserNotification()
-        n.title = "SushiSpeak 🍣"
-        n.informativeText = "Practice session complete! Great job."
-        n.soundName = NSUserNotificationDefaultSoundName
-        NSUserNotificationCenter.default.deliver(n)
+        // Play system alert sound
+        NSSound(named: NSSound.Name("Glass"))?.play()
+        // Bounce dock icon until user clicks the app
+        NSApp.requestUserAttention(.criticalRequest)
     }
 
     func stopSession() {
