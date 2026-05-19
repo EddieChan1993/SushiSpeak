@@ -33,26 +33,16 @@ class AudioRecorder: NSObject, ObservableObject {
 
     private func makeAudioFile(sampleRate: Double) -> (AVAudioFile, URL)? {
         let ts = Int(Date().timeIntervalSince1970)
-
-        // Try MP3 first (requires macOS built-in Fraunhofer encoder)
-        let mp3URL = storageDir.appendingPathComponent("rec_\(ts).mp3")
-        if let f = try? AVAudioFile(forWriting: mp3URL, settings: [
-            AVFormatIDKey: kAudioFormatMPEGLayer3,
-            AVSampleRateKey: sampleRate,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 128000
-        ]) { return (f, mp3URL) }
-
-        // Fallback: M4A (AAC)
-        let m4aURL = storageDir.appendingPathComponent("rec_\(ts).m4a")
-        if let f = try? AVAudioFile(forWriting: m4aURL, settings: [
+        // Record as M4A (reliable), convert to MP3 after stopping
+        let url = storageDir.appendingPathComponent("rec_\(ts).m4a")
+        let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: sampleRate,
             AVNumberOfChannelsKey: 1,
             AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
-        ]) { return (f, m4aURL) }
-
-        return nil
+        ]
+        guard let f = try? AVAudioFile(forWriting: url, settings: settings) else { return nil }
+        return (f, url)
     }
 
     private func doStart() {
@@ -64,27 +54,22 @@ class AudioRecorder: NSObject, ObservableObject {
         audioFile = file
         currentURL = url
 
-        // Boost input gain before writing to file
         let boosterNode = AVAudioMixerNode()
         eng.attach(boosterNode)
         eng.connect(input, to: boosterNode, format: inputFormat)
         eng.connect(boosterNode, to: eng.mainMixerNode, format: inputFormat)
         boosterNode.outputVolume = 2.5
-        eng.mainMixerNode.outputVolume = 0  // no speaker bleed
+        eng.mainMixerNode.outputVolume = 0
 
         let tapFormat = AVAudioFormat(standardFormatWithSampleRate: inputFormat.sampleRate, channels: 1)!
-
         boosterNode.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { [weak self] buffer, _ in
             try? self?.audioFile?.write(from: buffer)
-
-            // RMS metering
             guard let data = buffer.floatChannelData?[0] else { return }
             let count = Int(buffer.frameLength)
             var sum: Float = 0
             for i in 0..<count { sum += data[i] * data[i] }
             let rms = sqrt(sum / Float(max(count, 1)))
             let level: Float = rms > 0.012 ? min(1, (rms - 0.012) * 14) : 0
-            // exponential smoothing — avoids frame-rate stuttering
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.audioLevel = self.audioLevel * 0.55 + level * 0.45
@@ -110,21 +95,47 @@ class AudioRecorder: NSObject, ObservableObject {
         booster = nil
         audioFile = nil
 
-        guard let url = currentURL else { return }
-        let duration = Date().timeIntervalSince(startTime ?? Date())
-        recordings.insert(
-            Recording(id: UUID(), url: url, date: startTime ?? Date(), duration: duration),
-            at: 0
-        )
+        guard let sourceURL = currentURL else { return }
+        let date = startTime ?? Date()
+        let duration = Date().timeIntervalSince(date)
         currentURL = nil
         startTime = nil
+
+        // Try to convert M4A → MP3 in background
+        Task {
+            let finalURL = await convertToMP3(from: sourceURL)
+            let rec = Recording(id: UUID(), url: finalURL, date: date, duration: duration)
+            await MainActor.run { recordings.insert(rec, at: 0) }
+        }
     }
 
-    func duplicate(_ recording: Recording) {
-        let dest = storageDir.appendingPathComponent("rec_\(Int(Date().timeIntervalSince1970)).m4a")
-        guard (try? FileManager.default.copyItem(at: recording.url, to: dest)) != nil else { return }
-        let copy = Recording(id: UUID(), url: dest, date: Date(), duration: recording.duration)
-        recordings.insert(copy, at: 0)
+    // MARK: - MP3 conversion via lame or ffmpeg
+
+    private func convertToMP3(from sourceURL: URL) async -> URL {
+        let mp3URL = sourceURL.deletingPathExtension().appendingPathExtension("mp3")
+
+        let ffmpegPaths = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+        guard let ffmpeg = ffmpegPaths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+            return sourceURL // ffmpeg not found, keep M4A
+        }
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: ffmpeg)
+        proc.arguments = ["-y", "-i", sourceURL.path, "-q:a", "2", mp3URL.path]
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError  = FileHandle.nullDevice
+
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            if proc.terminationStatus == 0,
+               FileManager.default.fileExists(atPath: mp3URL.path) {
+                try? FileManager.default.removeItem(at: sourceURL)
+                return mp3URL
+            }
+        } catch {}
+
+        return sourceURL
     }
 
     func delete(_ recording: Recording) {
@@ -145,7 +156,7 @@ class AudioRecorder: NSObject, ObservableObject {
         ) else { return }
 
         var result: [Recording] = []
-        for url in files.filter({ ["m4a", "mp3", "wav"].contains($0.pathExtension) }) {
+        for url in files.filter({ ["m4a", "mp3", "aac", "wav"].contains($0.pathExtension) }) {
             let attrs = try? url.resourceValues(forKeys: [.creationDateKey])
             let date = attrs?.creationDate ?? Date()
             let asset = AVURLAsset(url: url)
