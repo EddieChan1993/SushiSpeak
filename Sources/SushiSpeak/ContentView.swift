@@ -44,6 +44,9 @@ struct ContentView: View {
         .onAppear {
             timeRemaining = totalSeconds
             recorder.preferredFormat = selectedFormat
+            DispatchQueue.main.async {
+                NSApp.keyWindow?.makeFirstResponder(nil)
+            }
         }
         .onChange(of: audioFormatRaw) { _ in
             recorder.preferredFormat = selectedFormat
@@ -124,6 +127,7 @@ struct ContentView: View {
                     }
                     .labelsHidden()
                     .frame(width: 64)
+                    .focusable(false)
                 }
                 .opacity(isRunning ? 0 : 1)
                 .disabled(isRunning)
