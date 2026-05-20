@@ -44,24 +44,41 @@ User selects format via picker in the timer panel; stored in `@AppStorage("audio
 **豆包 compatibility**: WAV rejected, AAC rejected. MP3 works.
 
 ### Whisper transcription (whisper-cpp)
-Clicking the `waveform.and.mic` button in each recording row:
+Clicking the `captions.bubble` button in each recording row:
 1. ffmpeg converts audio → 16kHz mono WAV (best accuracy for whisper)
 2. `whisper-cli -m model.bin -f audio.wav -l auto --no-timestamps` runs
-3. Transcript copied to clipboard; button shows green checkmark 2s
+3. Transcript shown in a sheet with selectable text + copy button
 
 **Context awareness**: `--prompt` flag available; currently unused (pass previous transcript for continuity).
 **Language**: `-l auto` handles Chinese, English, mixed.
 
 **Models** (GGML format, stored in `~/Library/Application Support/SushiSpeak/models/`):
-| Name | Size | Notes |
+| Name | File | Notes |
 |------|------|-------|
-| Tiny | ~75 MB | fastest, lowest accuracy |
-| Base | ~142 MB | |
-| Small | ~466 MB | **default** |
-| Medium | ~1.5 GB | |
-| Large V3 | ~3.1 GB | best accuracy |
+| Tiny | `ggml-tiny.bin` | fastest, lowest accuracy |
+| Base | `ggml-base.bin` | |
+| Small | `ggml-small.bin` | **default** |
+| Medium | `ggml-medium.bin` | |
+| Large V3 | `ggml-large-v3.bin` | best accuracy |
 
-Model picker in recordings panel header. Selecting an unavailable model triggers auto-download (streaming, 128 KB chunks, cancellable).
+Model picker in recordings panel header. No auto-download — user imports `ggml-*.bin` files manually (download URL shown in 🌐 popover). Green dot on each picker item indicates model is present.
+
+### Model import — atomic, 3-phase
+
+`importModelFile()` in ContentView opens `NSOpenPanel` with `allowsMultipleSelection = true`.
+
+**Phase 1 (sync):** detect model from filename, reject unknown names, reject duplicates within the selection. Errors shown immediately; entire import aborted.
+
+**Phase 2 (async):** `WhisperTranscriber.validateModelWorks(_:at:)` — runs `whisper-cli` against a tiny 0.5 s silent WAV to confirm the model actually loads. Runs in `Task.detached` so the main thread is never blocked. UI shows a `ProgressView` spinner. Any subprocess failure surfaces the stderr text as a specific error. All models validated sequentially before any file is copied.
+
+**Phase 3 (sync):** `importModel(_:from:)` copies each validated file to App Support. Picker switches to the last imported model.
+
+File-name matching rules:
+- Exact match: `ggml-small.bin` → Small
+- Fuzzy suffix: `ggml-small (1).bin` or `ggml-small copy.bin` → Small (handles macOS duplicate-download names)
+- Everything else → error (e.g. `ggml-base.en.bin` is rejected)
+
+No size check, no magic-bytes check — actual execution is the ground truth.
 
 ### Bundled external tools
 Production build bundles into `Contents/MacOS/`:
@@ -104,4 +121,5 @@ Waveform and duration picker share a `ZStack` at fixed `height: 48`, toggled by 
 - `booster.removeTap(onBus: 0)` must be called before `engine.stop()` — occasional EXC_BAD_ACCESS on rapid start/stop otherwise.
 - `DYLD_LIBRARY_PATH` is set on the child Process environment; this works for non-system binaries but may be stripped by SIP in edge cases.
 - Whisper `--prompt` context is not yet wired to previous transcripts in the UI.
-- On first launch with no downloaded model, the transcribe button will fail silently — user must download a model first.
+- Model validation (`validateModelWorks`) runs whisper-cli sequentially per file; validating a Large V3 model can take 30–60 s — the spinner will show for that duration.
+- `transcribe()` calls `proc.waitUntilExit()` directly; for large models this briefly ties up a Swift concurrency thread (not the main thread). Acceptable for now.
