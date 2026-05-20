@@ -16,6 +16,7 @@ struct ContentView: View {
     @State private var startHovered = false
     @State private var showDeleteConfirm = false
     @State private var importHovered = false
+    @State private var linkHovered = false
     @State private var importErrorMsg: String? = nil
     @State private var showImportError = false
 
@@ -189,6 +190,20 @@ struct ContentView: View {
                     .labelsHidden()
                     .frame(width: 90)
 
+                    // Open download page in browser
+                    Button {
+                        NSWorkspace.shared.open(selectedWhisperModel.downloadURL)
+                    } label: {
+                        Image(systemName: "arrow.down.circle")
+                            .foregroundStyle(linkHovered ? Color.accentColor : Color.secondary)
+                            .scaleEffect(linkHovered ? 1.2 : 1.0)
+                            .animation(.spring(response: 0.15), value: linkHovered)
+                    }
+                    .buttonStyle(.plain)
+                    .help("在浏览器下载 \(selectedWhisperModel.displayName)\n\(selectedWhisperModel.downloadURL.absoluteString)")
+                    .onHover { linkHovered = $0 }
+
+                    // Import from local file
                     Button { importModelFile() } label: {
                         Image(systemName: whisper.isModelAvailable(selectedWhisperModel)
                               ? "checkmark.circle.fill" : "folder.badge.plus")
@@ -202,8 +217,8 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .help(whisper.isModelAvailable(selectedWhisperModel)
-                          ? "\(selectedWhisperModel.shortName) 模型已就绪"
-                          : "导入 ggml-\(selectedWhisperModel.rawValue).bin\n从 huggingface.co/ggerganov/whisper.cpp 下载")
+                          ? "\(selectedWhisperModel.shortName) 模型已就绪，点击可替换"
+                          : "从本地导入已下载的 ggml-\(selectedWhisperModel.rawValue).bin")
                     .onHover { importHovered = $0 }
                     .alert("导入失败", isPresented: $showImportError) {
                         Button("好") {}
