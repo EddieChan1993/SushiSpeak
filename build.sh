@@ -36,6 +36,12 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp "$BUILD_DIR/$BUILD_TYPE/$APP_NAME" "$MACOS_DIR/$APP_NAME"
 
+# Copy app icon
+if [ -f "Assets/AppIcon.icns" ]; then
+    cp "Assets/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
+    echo "  Bundled: AppIcon.icns"
+fi
+
 # Write Info.plist
 cat > "$CONTENTS/Info.plist" << 'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -64,6 +70,8 @@ cat > "$CONTENTS/Info.plist" << 'PLIST'
     <string>SushiSpeak uses speech recognition to transcribe your recordings.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
