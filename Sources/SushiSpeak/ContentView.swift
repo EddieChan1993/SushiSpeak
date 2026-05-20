@@ -39,7 +39,7 @@ struct ContentView: View {
             Divider()
             recordingsPanel
         }
-        .frame(minWidth: 360, minHeight: 520)
+        .frame(minWidth: 380, minHeight: 620)
         .background(WindowTitleHider())
         .onAppear {
             timeRemaining = totalSeconds
@@ -102,6 +102,7 @@ struct ContentView: View {
                             .frame(width: 48, alignment: .trailing)
                     }
                     .onChange(of: selectedMinutes) { _ in timeRemaining = totalSeconds }
+                    .focusable(false)
 
                     Stepper(
                         value: $selectedSeconds, in: 0...59,
@@ -112,6 +113,7 @@ struct ContentView: View {
                             .frame(width: 52, alignment: .trailing)
                     }
                     .onChange(of: selectedSeconds) { _ in timeRemaining = totalSeconds }
+                    .focusable(false)
 
                     Divider().frame(height: 20)
 

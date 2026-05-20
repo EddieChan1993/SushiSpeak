@@ -1,32 +1,39 @@
-# SushiSpeak 🍣
+# SushiSpeak
 
-A native macOS app for English speaking practice. Set a countdown timer, hit Start — it records your voice and saves the audio when time's up.
+A native macOS app for English speaking practice. Set a countdown timer, hit Start — it records your voice, shows a live waveform, and saves the audio when time's up.
+
+![SushiSpeak App Screenshot](screenshots/app.png)
 
 ## Features
 
-- **Countdown timer** — MM:SS format, remembers your last setting across launches
-- **Auto record** — starts recording when you hit Start, stops and saves when time is up
-- **Live waveform** — animated bars driven by real microphone audio level (flat when silent)
-- **Recording list** — every session saved with date and duration
+- **Countdown timer** — MM:SS display, stepper controls for minutes and seconds, persists across launches
+- **Auto record** — starts recording on Start, stops and saves on timeout or manual Stop
+- **Live waveform** — animated bars driven by real microphone RMS level (flat when silent)
+- **Audio format** — choose MP3 / M4A / WAV per session; format badge shown on each recording
+- **Gain boost** — 2.5× input amplification so normal speaking volume comes out clearly
+- **Recording list**
   - ▶ Play back inline
   - 📁 Reveal in Finder
-  - 📄 Copy file to clipboard
-  - 🗑 Delete with confirmation dialog
-  - Delete All with confirmation
-- **System notification** — banner + sound when session completes
-- **Audio format** — MP3 (falls back to M4A if encoder unavailable)
-- **Gain boost** — 2.5× input amplification so normal speaking volume comes out clearly
+  - 🎙 Transcribe with Whisper → result shown in popup, one-click copy
+  - 🗑 Delete with confirmation; Delete All
+- **Whisper transcription** — local on-device AI (whisper-cpp), supports Chinese / English / mixed
+  - Models: Tiny / Base / Small (default) / Medium / Large V3
+  - Download models in-app; progress shown in header
+- **System alert** — sound + Dock bounce when session ends (no notification permissions needed)
 
 ## Requirements
 
 - macOS 13 or later
-- Xcode Command Line Tools (`xcode-select --install`)
+- Xcode Command Line Tools: `xcode-select --install`
+- ffmpeg (Homebrew): `brew install ffmpeg` *(for dev mode only — bundled in production build)*
+- whisper-cpp (Homebrew): `brew install whisper-cpp` *(for dev mode only — bundled in production build)*
 
 ## Build & Run
 
 ```bash
 cd ~/code/SushiSpeak
-./build.sh          # compiles, packages, kills old instance, opens new build
+./build.sh          # release build: bundles ffmpeg + whisper-cli, opens app
+./build.sh -d       # dev build: uses system Homebrew tools, faster iteration
 ```
 
 Output: `.build/SushiSpeak.app`
@@ -36,12 +43,19 @@ Install permanently:
 cp -r .build/SushiSpeak.app ~/Applications/
 ```
 
-## First Launch
+## Whisper Models
 
-1. Grant **Microphone** permission when prompted
-2. Grant **Notifications** permission when prompted (required for end-of-session alert)
-   - If you accidentally denied: System Settings → Notifications → SushiSpeak → Allow
+On first use, select a model and click the download button (↓) in the Recordings header.  
+Models are stored in `~/Library/Application Support/SushiSpeak/models/`.
+
+| Model | Size | Speed |
+|-------|------|-------|
+| Tiny | ~75 MB | fastest |
+| Base | ~142 MB | fast |
+| **Small** | **~466 MB** | **default** |
+| Medium | ~1.5 GB | accurate |
+| Large V3 | ~3.1 GB | most accurate |
 
 ## Recordings Location
 
-`~/Documents/SushiSpeak/rec_<timestamp>.mp3`
+`~/Documents/SushiSpeak/rec_<timestamp>.<format>`
