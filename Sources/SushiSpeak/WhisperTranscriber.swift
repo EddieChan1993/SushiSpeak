@@ -149,6 +149,12 @@ class WhisperTranscriber: ObservableObject {
         try FileManager.default.copyItem(at: sourceURL, to: dest)
     }
 
+    func deleteModel(_ model: WhisperModel) throws {
+        let dest = modelPath(for: model)
+        guard FileManager.default.fileExists(atPath: dest.path) else { return }
+        try FileManager.default.removeItem(at: dest)
+    }
+
     // MARK: - Transcribe
 
     func transcribe(url: URL, model: WhisperModel, prompt: String? = nil) async throws -> String {

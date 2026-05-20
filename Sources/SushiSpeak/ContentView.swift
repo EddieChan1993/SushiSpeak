@@ -19,6 +19,9 @@ struct ContentView: View {
     @State private var linkHovered = false
     @State private var importErrorMsg: String? = nil
     @State private var showImportError = false
+    @State private var showModelInfo = false
+    @State private var deleteModelHovered = false
+    @State private var showDeleteModelConfirm = false
 
     var selectedFormat: AudioFormat {
         AudioFormat(rawValue: audioFormatRaw) ?? .mp3
@@ -190,40 +193,62 @@ struct ContentView: View {
                     .labelsHidden()
                     .frame(width: 100)
 
-                    // Open download page in browser
-                    Button {
-                        NSWorkspace.shared.open(selectedWhisperModel.downloadURL)
-                    } label: {
-                        Image(systemName: "arrow.down.circle")
+                    // 🌐 Info popover — shows download URL, no auto-download
+                    Button { showModelInfo = true } label: {
+                        Image(systemName: "globe")
                             .foregroundStyle(linkHovered ? Color.accentColor : Color.secondary)
-                            .scaleEffect(linkHovered ? 1.2 : 1.0)
+                            .scaleEffect(linkHovered ? 1.15 : 1.0)
                             .animation(.spring(response: 0.15), value: linkHovered)
                     }
                     .buttonStyle(.plain)
-                    .help("在浏览器下载 \(selectedWhisperModel.displayName)\n\(selectedWhisperModel.downloadURL.absoluteString)")
+                    .help("查看下载地址")
                     .onHover { linkHovered = $0 }
-
-                    // Import from local file
-                    Button { importModelFile() } label: {
-                        Image(systemName: whisper.isModelAvailable(selectedWhisperModel)
-                              ? "checkmark.circle.fill" : "folder.badge.plus")
-                            .foregroundStyle(
-                                whisper.isModelAvailable(selectedWhisperModel)
-                                ? Color.green.opacity(0.8)
-                                : (importHovered ? Color.accentColor : Color.secondary)
-                            )
-                            .scaleEffect(importHovered && !whisper.isModelAvailable(selectedWhisperModel) ? 1.2 : 1.0)
-                            .animation(.spring(response: 0.15), value: importHovered)
+                    .popover(isPresented: $showModelInfo, arrowEdge: .bottom) {
+                        ModelInfoPopover(model: selectedWhisperModel, isPresented: $showModelInfo)
                     }
-                    .buttonStyle(.plain)
-                    .help(whisper.isModelAvailable(selectedWhisperModel)
-                          ? "\(selectedWhisperModel.shortName) 模型已就绪，点击可替换"
-                          : "从本地导入已下载的 ggml-\(selectedWhisperModel.rawValue).bin")
-                    .onHover { importHovered = $0 }
-                    .alert("导入失败", isPresented: $showImportError) {
-                        Button("好") {}
-                    } message: {
-                        Text(importErrorMsg ?? "")
+
+                    // 📁+ Import / ✓ Already available
+                    if !whisper.isModelAvailable(selectedWhisperModel) {
+                        Button { importModelFile() } label: {
+                            Image(systemName: "folder.badge.plus")
+                                .foregroundStyle(importHovered ? Color.accentColor : Color.secondary)
+                                .scaleEffect(importHovered ? 1.15 : 1.0)
+                                .animation(.spring(response: 0.15), value: importHovered)
+                        }
+                        .buttonStyle(.plain)
+                        .help("导入 ggml-\(selectedWhisperModel.rawValue).bin")
+                        .onHover { importHovered = $0 }
+                        .alert("导入失败", isPresented: $showImportError) {
+                            Button("好") {}
+                        } message: { Text(importErrorMsg ?? "") }
+                    } else {
+                        // ✓ + 🗑 delete
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green.opacity(0.8))
+
+                            Button { showDeleteModelConfirm = true } label: {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(deleteModelHovered ? Color.red : Color.secondary)
+                                    .scaleEffect(deleteModelHovered ? 1.15 : 1.0)
+                                    .animation(.spring(response: 0.15), value: deleteModelHovered)
+                            }
+                            .buttonStyle(.plain)
+                            .help("删除 \(selectedWhisperModel.shortName) 模型文件")
+                            .onHover { deleteModelHovered = $0 }
+                            .confirmationDialog(
+                                "删除 \(selectedWhisperModel.shortName) 模型？",
+                                isPresented: $showDeleteModelConfirm,
+                                titleVisibility: .visible
+                            ) {
+                                Button("删除", role: .destructive) {
+                                    try? whisper.deleteModel(selectedWhisperModel)
+                                }
+                            } message: {
+                                Text("模型文件将从本地删除，下次使用需重新导入。")
+                            }
+                        }
+                        .font(.caption)
                     }
                 }
 
@@ -562,6 +587,95 @@ struct RecordingRow: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + recording.duration + 0.5) {
                 isPlaying = false
             }
+        }
+    }
+}
+
+// MARK: - Model Info Popover
+
+struct ModelInfoPopover: View {
+    let model: WhisperModel
+    @Binding var isPresented: Bool
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "cube.box")
+                    .foregroundStyle(.secondary)
+                Text("Whisper \(model.shortName) 模型")
+                    .font(.headline)
+                Spacer()
+                Button { isPresented = false } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Divider()
+
+            Group {
+                LabeledRow(label: "文件名", value: model.fileName)
+                LabeledRow(label: "大小", value: model.displayName.components(separatedBy: "(").last.map { "(" + $0 } ?? "")
+                LabeledRow(label: "格式", value: "GGML 二进制格式（whisper.cpp 专用）")
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("下载地址")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(model.downloadURL.absoluteString)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(model.downloadURL.absoluteString, forType: .string)
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                } label: {
+                    Label(copied ? "已复制" : "复制链接", systemImage: copied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .tint(copied ? .green : .accentColor)
+                .controlSize(.small)
+
+                Spacer()
+
+                Button("在浏览器打开") {
+                    NSWorkspace.shared.open(model.downloadURL)
+                    isPresented = false
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+        .padding(16)
+        .frame(width: 340)
+    }
+}
+
+struct LabeledRow: View {
+    let label: String
+    let value: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .trailing)
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(.primary)
+            Spacer()
         }
     }
 }
