@@ -345,14 +345,18 @@ struct ContentView: View {
         var lastImported: WhisperModel? = nil
         var errors: [String] = []
 
+        let expectedNames = WhisperModel.allCases.map { $0.fileName }.joined(separator: "\n  ")
+
         for url in panel.urls {
-            let detected = WhisperModel.allCases.first { url.lastPathComponent == $0.fileName }
-            let target = detected ?? selectedWhisperModel
+            guard let target = WhisperModel.allCases.first(where: { url.lastPathComponent == $0.fileName }) else {
+                errors.append("「\(url.lastPathComponent)」文件名不符合要求。\n仅支持以下文件名：\n  \(expectedNames)")
+                continue
+            }
             do {
                 try whisper.importModel(target, from: url)
                 lastImported = target
             } catch {
-                errors.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                errors.append("「\(url.lastPathComponent)」：\(error.localizedDescription)")
             }
         }
 
