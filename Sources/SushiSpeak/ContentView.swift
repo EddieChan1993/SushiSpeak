@@ -336,22 +336,33 @@ struct ContentView: View {
     func importModelFile() {
         let panel = NSOpenPanel()
         panel.title = "选择 Whisper 模型文件"
-        panel.message = "选择 ggml-*.bin 文件（将自动识别模型类型）"
-        panel.allowsMultipleSelection = false
+        panel.message = "可同时选择多个 ggml-*.bin 文件，将自动识别并分别导入"
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = []
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK else { return }
 
-        // Auto-detect model from filename, fall back to current selection
-        let detected = WhisperModel.allCases.first { url.lastPathComponent == $0.fileName }
-        let target = detected ?? selectedWhisperModel
+        var lastImported: WhisperModel? = nil
+        var errors: [String] = []
 
-        do {
-            try whisper.importModel(target, from: url)
-            // Switch picker to match the actual imported model
-            whisperModelRaw = target.rawValue
-        } catch {
-            importErrorMsg = error.localizedDescription
+        for url in panel.urls {
+            let detected = WhisperModel.allCases.first { url.lastPathComponent == $0.fileName }
+            let target = detected ?? selectedWhisperModel
+            do {
+                try whisper.importModel(target, from: url)
+                lastImported = target
+            } catch {
+                errors.append("\(url.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+
+        // Switch picker to the last successfully imported model
+        if let last = lastImported {
+            whisperModelRaw = last.rawValue
+        }
+
+        if !errors.isEmpty {
+            importErrorMsg = errors.joined(separator: "\n\n")
             showImportError = true
         }
     }
