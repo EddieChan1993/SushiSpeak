@@ -176,9 +176,19 @@ struct ContentView: View {
 
                 // Whisper model picker + import
                 HStack(spacing: 6) {
-                    Image(systemName: "waveform")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    // 🌐 Info popover — left of picker
+                    Button { showModelInfo = true } label: {
+                        Image(systemName: "globe")
+                            .foregroundStyle(linkHovered ? Color.accentColor : Color.secondary)
+                            .scaleEffect(linkHovered ? 1.15 : 1.0)
+                            .animation(.spring(response: 0.15), value: linkHovered)
+                    }
+                    .buttonStyle(.plain)
+                    .help("查看下载地址")
+                    .onHover { linkHovered = $0 }
+                    .popover(isPresented: $showModelInfo, arrowEdge: .bottom) {
+                        ModelInfoPopover(model: selectedWhisperModel, isPresented: $showModelInfo)
+                    }
 
                     Picker("", selection: $whisperModelRaw) {
                         ForEach(WhisperModel.allCases) { m in
@@ -193,21 +203,7 @@ struct ContentView: View {
                     .labelsHidden()
                     .frame(width: 100)
 
-                    // 🌐 Info popover — shows download URL, no auto-download
-                    Button { showModelInfo = true } label: {
-                        Image(systemName: "globe")
-                            .foregroundStyle(linkHovered ? Color.accentColor : Color.secondary)
-                            .scaleEffect(linkHovered ? 1.15 : 1.0)
-                            .animation(.spring(response: 0.15), value: linkHovered)
-                    }
-                    .buttonStyle(.plain)
-                    .help("查看下载地址")
-                    .onHover { linkHovered = $0 }
-                    .popover(isPresented: $showModelInfo, arrowEdge: .bottom) {
-                        ModelInfoPopover(model: selectedWhisperModel, isPresented: $showModelInfo)
-                    }
-
-                    // 📁+ Import / ✓ Already available
+                    // 📁+ Import (not available) / 🗑 Delete (available)
                     if !whisper.isModelAvailable(selectedWhisperModel) {
                         Button { importModelFile() } label: {
                             Image(systemName: "folder.badge.plus")
@@ -222,33 +218,26 @@ struct ContentView: View {
                             Button("好") {}
                         } message: { Text(importErrorMsg ?? "") }
                     } else {
-                        // ✓ + 🗑 delete
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green.opacity(0.8))
-
-                            Button { showDeleteModelConfirm = true } label: {
-                                Image(systemName: "trash")
-                                    .foregroundStyle(deleteModelHovered ? Color.red : Color.secondary)
-                                    .scaleEffect(deleteModelHovered ? 1.15 : 1.0)
-                                    .animation(.spring(response: 0.15), value: deleteModelHovered)
-                            }
-                            .buttonStyle(.plain)
-                            .help("删除 \(selectedWhisperModel.shortName) 模型文件")
-                            .onHover { deleteModelHovered = $0 }
-                            .confirmationDialog(
-                                "删除 \(selectedWhisperModel.shortName) 模型？",
-                                isPresented: $showDeleteModelConfirm,
-                                titleVisibility: .visible
-                            ) {
-                                Button("删除", role: .destructive) {
-                                    try? whisper.deleteModel(selectedWhisperModel)
-                                }
-                            } message: {
-                                Text("模型文件将从本地删除，下次使用需重新导入。")
-                            }
+                        Button { showDeleteModelConfirm = true } label: {
+                            Image(systemName: "trash")
+                                .foregroundStyle(deleteModelHovered ? Color.red : Color.secondary)
+                                .scaleEffect(deleteModelHovered ? 1.15 : 1.0)
+                                .animation(.spring(response: 0.15), value: deleteModelHovered)
                         }
-                        .font(.caption)
+                        .buttonStyle(.plain)
+                        .help("删除 \(selectedWhisperModel.shortName) 模型文件")
+                        .onHover { deleteModelHovered = $0 }
+                        .confirmationDialog(
+                            "删除 \(selectedWhisperModel.shortName) 模型？",
+                            isPresented: $showDeleteModelConfirm,
+                            titleVisibility: .visible
+                        ) {
+                            Button("删除", role: .destructive) {
+                                try? whisper.deleteModel(selectedWhisperModel)
+                            }
+                        } message: {
+                            Text("模型文件将从本地删除，下次使用需重新导入。")
+                        }
                     }
                 }
 
@@ -435,6 +424,8 @@ struct RecordingRow: View {
     @State private var showDownloadConfirm = false
     @State private var showTranscriptSheet = false
     @State private var transcriptText = ""
+    @State private var transcribeError: String? = nil
+    @State private var showTranscribeError = false
 
     enum TranscribeState {
         case idle, loading, failed
@@ -508,9 +499,14 @@ struct RecordingRow: View {
                 .frame(width: 16)
             }
             .buttonStyle(.plain)
-            .help(whisper.isModelAvailable(whisperModel) ? "Transcribe audio" : "Download model to transcribe")
+            .help(whisper.isModelAvailable(whisperModel) ? "识别语音" : "请先导入模型")
             .onHover { transcribeHovered = $0 }
             .disabled(transcribeState == .loading)
+            .alert("识别失败", isPresented: $showTranscribeError) {
+                Button("好") { transcribeState = .idle }
+            } message: {
+                Text(transcribeError ?? "未知错误")
+            }
             .confirmationDialog(
                 "下载 \(whisperModel.displayName) 模型？",
                 isPresented: $showDownloadConfirm,
@@ -567,10 +563,10 @@ struct RecordingRow: View {
                 }
             } catch {
                 await MainActor.run {
+                    transcribeError = error.localizedDescription
                     transcribeState = .failed
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { transcribeState = .idle }
+                    showTranscribeError = true
                 }
-                print("Transcribe error: \(error.localizedDescription)")
             }
         }
     }
