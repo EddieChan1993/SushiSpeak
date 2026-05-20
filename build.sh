@@ -94,8 +94,9 @@ cat > "$BUILD_DIR/$APP_NAME.entitlements" << 'ENT'
 </plist>
 ENT
 
-# Production: bundle ffmpeg so the app works on machines without Homebrew
+# Production: bundle ffmpeg and whisper-cli so the app works without Homebrew
 if [ "$DEV_MODE" = false ]; then
+    # --- ffmpeg ---
     FFMPEG_SRC=""
     for p in /opt/homebrew/bin/ffmpeg /usr/local/bin/ffmpeg; do
         if [ -f "$p" ]; then FFMPEG_SRC="$p"; break; fi
@@ -105,6 +106,71 @@ if [ "$DEV_MODE" = false ]; then
         echo "  Bundled: ffmpeg ($(du -sh "$MACOS_DIR/ffmpeg" | cut -f1))"
     else
         echo "  ⚠️  ffmpeg not found — MP3 conversion unavailable"
+    fi
+
+    # --- whisper-cli + dylibs + backend plugins ---
+    WHISPER_CLI_SRC=""
+    for p in /opt/homebrew/bin/whisper-cli /usr/local/bin/whisper-cli; do
+        if [ -f "$p" ]; then WHISPER_CLI_SRC="$p"; break; fi
+    done
+
+    if [ -n "$WHISPER_CLI_SRC" ]; then
+        cp "$WHISPER_CLI_SRC" "$MACOS_DIR/whisper-cli"
+
+        # Copy libwhisper
+        WHISPER_VER=$(ls /opt/homebrew/Cellar/whisper-cpp/ 2>/dev/null | head -1)
+        WHISPER_LIB="/opt/homebrew/Cellar/whisper-cpp/$WHISPER_VER/lib/libwhisper.1.dylib"
+        if [ -f "$WHISPER_LIB" ]; then
+            cp "$WHISPER_LIB" "$MACOS_DIR/libwhisper.1.dylib"
+        fi
+
+        # Copy ggml libs
+        GGML_LIB_DIR="/opt/homebrew/opt/ggml/lib"
+        for lib in libggml.0.dylib libggml-base.0.dylib; do
+            [ -f "$GGML_LIB_DIR/$lib" ] && cp "$GGML_LIB_DIR/$lib" "$MACOS_DIR/$lib"
+        done
+
+        # Copy ggml backend plugins (.so) — metal, blas, cpu variants
+        GGML_LIBEXEC="/opt/homebrew/opt/ggml/libexec"
+        if [ -d "$GGML_LIBEXEC" ]; then
+            cp "$GGML_LIBEXEC"/libggml-*.so "$MACOS_DIR/" 2>/dev/null || true
+        fi
+
+        # Fix rpath on whisper-cli binary
+        install_name_tool -add_rpath "@executable_path" "$MACOS_DIR/whisper-cli" 2>/dev/null || true
+        install_name_tool \
+            -change "/opt/homebrew/opt/ggml/lib/libggml.0.dylib" "@rpath/libggml.0.dylib" \
+            -change "/opt/homebrew/opt/ggml/lib/libggml-base.0.dylib" "@rpath/libggml-base.0.dylib" \
+            "$MACOS_DIR/whisper-cli" 2>/dev/null || true
+
+        # Fix rpath on libwhisper
+        if [ -f "$MACOS_DIR/libwhisper.1.dylib" ]; then
+            install_name_tool -id "@rpath/libwhisper.1.dylib" "$MACOS_DIR/libwhisper.1.dylib" 2>/dev/null || true
+            install_name_tool -add_rpath "@loader_path" "$MACOS_DIR/libwhisper.1.dylib" 2>/dev/null || true
+            install_name_tool \
+                -change "/opt/homebrew/opt/ggml/lib/libggml.0.dylib" "@loader_path/libggml.0.dylib" \
+                -change "/opt/homebrew/opt/ggml/lib/libggml-base.0.dylib" "@loader_path/libggml-base.0.dylib" \
+                "$MACOS_DIR/libwhisper.1.dylib" 2>/dev/null || true
+        fi
+
+        # Fix rpath on libggml
+        if [ -f "$MACOS_DIR/libggml.0.dylib" ]; then
+            install_name_tool -id "@rpath/libggml.0.dylib" "$MACOS_DIR/libggml.0.dylib" 2>/dev/null || true
+            install_name_tool -add_rpath "@loader_path" "$MACOS_DIR/libggml.0.dylib" 2>/dev/null || true
+            install_name_tool \
+                -change "@rpath/libggml-base.0.dylib" "@loader_path/libggml-base.0.dylib" \
+                "$MACOS_DIR/libggml.0.dylib" 2>/dev/null || true
+        fi
+
+        # Fix id on libggml-base
+        if [ -f "$MACOS_DIR/libggml-base.0.dylib" ]; then
+            install_name_tool -id "@rpath/libggml-base.0.dylib" "$MACOS_DIR/libggml-base.0.dylib" 2>/dev/null || true
+        fi
+
+        WHISPER_SIZE=$(du -sh "$MACOS_DIR"/libggml*.dylib "$MACOS_DIR/libwhisper.1.dylib" "$MACOS_DIR/whisper-cli" "$MACOS_DIR"/libggml*.so 2>/dev/null | awk '{sum += $1} END {print sum}')
+        echo "  Bundled: whisper-cli + dylibs + backends"
+    else
+        echo "  ⚠️  whisper-cli not found — install with: brew install whisper-cpp"
     fi
 fi
 

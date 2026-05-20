@@ -5,17 +5,24 @@ import AVFoundation
 
 struct ContentView: View {
     @StateObject private var recorder = AudioRecorder()
+    @StateObject private var whisper = WhisperTranscriber()
     @AppStorage("lastMinutes") private var selectedMinutes = 5
     @AppStorage("lastSeconds") private var selectedSeconds = 0
     @AppStorage("audioFormat") private var audioFormatRaw = AudioFormat.mp3.rawValue
+    @AppStorage("whisperModel") private var whisperModelRaw = WhisperModel.small.rawValue
     @State private var timeRemaining = 0
     @State private var isRunning = false
     @State private var timerTask: Task<Void, Never>?
     @State private var startHovered = false
     @State private var showDeleteConfirm = false
+    @State private var showModelPicker = false
 
     var selectedFormat: AudioFormat {
         AudioFormat(rawValue: audioFormatRaw) ?? .mp3
+    }
+
+    var selectedWhisperModel: WhisperModel {
+        WhisperModel(rawValue: whisperModelRaw) ?? .small
     }
 
     var totalSeconds: Int { selectedMinutes * 60 + selectedSeconds }
@@ -142,14 +149,68 @@ struct ContentView: View {
 
     var recordingsPanel: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 8) {
                 Text("Recordings")
                     .font(.headline)
                 Text("(\(recorder.recordings.count))")
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
+
                 Spacer()
+
+                // Whisper model picker + download status
+                if let progress = whisper.downloadProgress {
+                    HStack(spacing: 6) {
+                        ProgressView(value: progress)
+                            .frame(width: 60)
+                        Text("\(Int(progress * 100))%")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                        Button { whisper.cancelDownload() } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } else {
+                    HStack(spacing: 4) {
+                        Image(systemName: "waveform")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker("", selection: $whisperModelRaw) {
+                            ForEach(WhisperModel.allCases) { m in
+                                HStack {
+                                    Text(m.shortName)
+                                    if !whisper.isModelAvailable(m) {
+                                        Image(systemName: "arrow.down.circle")
+                                    }
+                                }.tag(m.rawValue)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 80)
+                        .onChange(of: whisperModelRaw) { _ in
+                            if !whisper.isModelAvailable(selectedWhisperModel) {
+                                whisper.downloadModel(selectedWhisperModel)
+                            }
+                        }
+
+                        if !whisper.isModelAvailable(selectedWhisperModel) {
+                            Button {
+                                whisper.downloadModel(selectedWhisperModel)
+                            } label: {
+                                Image(systemName: "arrow.down.circle")
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Download \(selectedWhisperModel.displayName)")
+                        }
+                    }
+                }
+
                 if !recorder.recordings.isEmpty {
+                    Divider().frame(height: 16)
                     Button("Delete All") { showDeleteConfirm = true }
                         .foregroundStyle(.red)
                         .buttonStyle(.plain)
@@ -181,7 +242,8 @@ struct ContentView: View {
                     List(recorder.recordings) { rec in
                         RecordingRow(
                             recording: rec,
-                            recorder: recorder,
+                            whisper: whisper,
+                            whisperModel: selectedWhisperModel,
                             onDelete: { recorder.delete(rec) }
                         )
                         .listRowInsets(EdgeInsets())
@@ -298,7 +360,8 @@ struct RecordingBadge: View {
 
 struct RecordingRow: View {
     let recording: Recording
-    let recorder: AudioRecorder
+    let whisper: WhisperTranscriber
+    let whisperModel: WhisperModel
     let onDelete: () -> Void
 
     @State private var player: AVAudioPlayer?
@@ -415,18 +478,21 @@ struct RecordingRow: View {
 
     func transcribeAndCopy() {
         transcribeState = .loading
-        recorder.transcribe(recording) { text in
-            DispatchQueue.main.async {
-                if let text, !text.isEmpty {
+        Task {
+            do {
+                let text = try await whisper.transcribe(url: recording.url, model: whisperModel)
+                await MainActor.run {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                     transcribeState = .done
-                } else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { transcribeState = .idle }
+                }
+            } catch {
+                await MainActor.run {
                     transcribeState = .failed
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { transcribeState = .idle }
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    transcribeState = .idle
-                }
+                print("Transcribe error: \(error.localizedDescription)")
             }
         }
     }

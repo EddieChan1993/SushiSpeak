@@ -1,7 +1,6 @@
 import Foundation
 import AVFoundation
 import CoreMedia
-import Speech
 
 enum AudioFormat: String, CaseIterable {
     case mp3 = "MP3"
@@ -167,31 +166,6 @@ class AudioRecorder: NSObject, ObservableObject {
         return sourceURL
     }
 
-    // MARK: - Speech transcription
-
-    func transcribe(_ recording: Recording, completion: @escaping (String?) -> Void) {
-        SFSpeechRecognizer.requestAuthorization { status in
-            guard status == .authorized else {
-                completion(nil)
-                return
-            }
-            let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
-                ?? SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-            guard let recognizer, recognizer.isAvailable else {
-                completion(nil)
-                return
-            }
-            let request = SFSpeechURLRecognitionRequest(url: recording.url)
-            request.requiresOnDeviceRecognition = false
-            recognizer.recognitionTask(with: request) { result, error in
-                if let result, result.isFinal {
-                    completion(result.bestTranscription.formattedString)
-                } else if error != nil {
-                    completion(nil)
-                }
-            }
-        }
-    }
 
     func delete(_ recording: Recording) {
         try? FileManager.default.removeItem(at: recording.url)
