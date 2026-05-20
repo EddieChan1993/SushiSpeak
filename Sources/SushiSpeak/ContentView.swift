@@ -93,25 +93,25 @@ struct ContentView: View {
                     Text("Duration:")
                         .foregroundStyle(.secondary)
 
-                    Picker("", selection: $selectedMinutes) {
-                        ForEach(0..<60, id: \.self) { Text("\($0) min").tag($0) }
+                    Stepper(
+                        value: $selectedMinutes, in: 0...59,
+                        onEditingChanged: { _ in timeRemaining = totalSeconds }
+                    ) {
+                        Text("\(selectedMinutes) min")
+                            .monospacedDigit()
+                            .frame(width: 48, alignment: .trailing)
                     }
-                    .labelsHidden()
-                    .frame(width: 80)
-                    .onChange(of: selectedMinutes) { _ in
-                        timeRemaining = totalSeconds
-                    }
+                    .onChange(of: selectedMinutes) { _ in timeRemaining = totalSeconds }
 
-                    Picker("", selection: $selectedSeconds) {
-                        ForEach(0..<60, id: \.self) {
-                            Text(String(format: "%02d sec", $0)).tag($0)
-                        }
+                    Stepper(
+                        value: $selectedSeconds, in: 0...59,
+                        onEditingChanged: { _ in timeRemaining = totalSeconds }
+                    ) {
+                        Text(String(format: "%02d sec", selectedSeconds))
+                            .monospacedDigit()
+                            .frame(width: 52, alignment: .trailing)
                     }
-                    .labelsHidden()
-                    .frame(width: 90)
-                    .onChange(of: selectedSeconds) { _ in
-                        timeRemaining = totalSeconds
-                    }
+                    .onChange(of: selectedSeconds) { _ in timeRemaining = totalSeconds }
 
                     Divider().frame(height: 20)
 
