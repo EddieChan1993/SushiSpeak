@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var linkHovered = false
     @State private var importErrorMsg: String? = nil
     @State private var showImportError = false
+    @State private var isValidatingImport = false
     @State private var showModelInfo = false
     @State private var deleteModelHovered = false
     @State private var showDeleteModelConfirm = false
@@ -203,8 +204,12 @@ struct ContentView: View {
                     .labelsHidden()
                     .frame(width: 100)
 
-                    // 📁+ Import (not available) / 🗑 Delete (available)
-                    if !whisper.isModelAvailable(selectedWhisperModel) {
+                    // 📁+ Import / ⏳ Validating / 🗑 Delete
+                    if isValidatingImport {
+                        ProgressView()
+                            .controlSize(.small)
+                            .help("正在验证模型…")
+                    } else if !whisper.isModelAvailable(selectedWhisperModel) {
                         Button { importModelFile() } label: {
                             Image(systemName: "folder.badge.plus")
                                 .foregroundStyle(importHovered ? Color.accentColor : Color.secondary)
@@ -214,9 +219,6 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                         .help("导入 ggml-\(selectedWhisperModel.rawValue).bin")
                         .onHover { importHovered = $0 }
-                        .alert("导入失败", isPresented: $showImportError) {
-                            Button("好") {}
-                        } message: { Text(importErrorMsg ?? "") }
                     } else {
                         Button { showDeleteModelConfirm = true } label: {
                             Image(systemName: "trash")
@@ -240,6 +242,9 @@ struct ContentView: View {
                         }
                     }
                 }
+                .alert("导入失败", isPresented: $showImportError) {
+                    Button("好") {}
+                } message: { Text(importErrorMsg ?? "") }
 
                 if !recorder.recordings.isEmpty {
                     Divider().frame(height: 16)
@@ -344,7 +349,7 @@ struct ContentView: View {
 
         let expectedNames = WhisperModel.allCases.map { $0.fileName }.joined(separator: "\n  ")
 
-        // Phase 1: detect model for every file + check for duplicates
+        // Phase 1: detect model for every file + check for duplicates (sync, instant)
         var plan: [(url: URL, model: WhisperModel)] = []
         var errors: [String] = []
 
@@ -366,32 +371,39 @@ struct ContentView: View {
             plan.append((url, model))
         }
 
-        // Phase 2: validate all files (size + magic bytes) — still no copying
-        if errors.isEmpty {
-            for item in plan {
-                do {
-                    try whisper.validateModel(item.model, at: item.url)
-                } catch {
-                    errors.append("「\(item.url.lastPathComponent)」：\(error.localizedDescription)")
-                }
-            }
-        }
-
-        // If any error in either phase: abort everything, show errors
         if !errors.isEmpty {
             importErrorMsg = errors.joined(separator: "\n\n")
             showImportError = true
             return
         }
 
-        // Phase 3: all checks passed — copy files
-        var lastImported: WhisperModel? = nil
-        for item in plan {
-            try? whisper.importModel(item.model, from: item.url)
-            lastImported = item.model
-        }
-        if let last = lastImported {
-            whisperModelRaw = last.rawValue
+        // Phase 2: run whisper-cli against each file to verify it loads (async)
+        // Phase 3: copy all only if every file passes
+        isValidatingImport = true
+        Task {
+            var validateErrors: [String] = []
+            for item in plan {
+                do {
+                    try await whisper.validateModelWorks(item.model, at: item.url)
+                } catch {
+                    validateErrors.append("「\(item.url.lastPathComponent)」：\(error.localizedDescription)")
+                }
+            }
+
+            isValidatingImport = false
+
+            if !validateErrors.isEmpty {
+                importErrorMsg = validateErrors.joined(separator: "\n\n")
+                showImportError = true
+                return
+            }
+
+            var lastImported: WhisperModel? = nil
+            for item in plan {
+                try? whisper.importModel(item.model, from: item.url)
+                lastImported = item.model
+            }
+            if let last = lastImported { whisperModelRaw = last.rawValue }
         }
     }
 }

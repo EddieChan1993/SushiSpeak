@@ -26,31 +26,15 @@ enum WhisperModel: String, CaseIterable, Identifiable {
         URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(fileName)")!
     }
 
-    // Minimum valid file size — rough lower bound to catch incomplete downloads
-    var minimumFileSize: Int64 {
-        switch self {
-        case .tiny:   return 50_000_000
-        case .base:   return 100_000_000
-        case .small:  return 350_000_000
-        case .medium: return 1_000_000_000
-        case .large:  return 2_000_000_000
-        }
-    }
 }
 
 enum ImportError: LocalizedError {
-    case cannotRead
-    case fileTooSmall(model: WhisperModel, actualMB: Int)
-    case invalidFormat(hex: String)
+    case modelLoadFailed(reason: String)
 
     var errorDescription: String? {
         switch self {
-        case .cannotRead:
-            return "无法读取文件，请检查文件权限。"
-        case .fileTooSmall(let model, let mb):
-            return "文件太小（\(mb) MB），可能是下载不完整或选错了文件。\n\(model.shortName) 模型应至少 \(model.minimumFileSize / 1_000_000) MB。"
-        case .invalidFormat(let hex):
-            return "不是有效的 Whisper 模型文件（文件头：\(hex)）。\n请确认从 huggingface.co/ggerganov/whisper.cpp 下载的是 ggml-*.bin 文件。"
+        case .modelLoadFailed(let reason):
+            return "模型无法正常运行：\(reason)"
         }
     }
 }
@@ -168,30 +152,69 @@ class WhisperTranscriber: ObservableObject {
         }
     }
 
-    // Validate only — does NOT copy the file
-    func validateModel(_ model: WhisperModel, at url: URL) throws {
-        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
-        let fileSize = (attrs[.size] as? Int64) ?? 0
-        guard fileSize >= model.minimumFileSize else {
-            throw ImportError.fileTooSmall(model: model, actualMB: Int(fileSize / 1_000_000))
-        }
-        guard let handle = FileHandle(forReadingAtPath: url.path) else {
-            throw ImportError.cannotRead
-        }
-        let magic = handle.readData(ofLength: 4)
-        handle.closeFile()
-        let validMagics: [Data] = [
-            Data([0x67, 0x67, 0x6d, 0x6c]), // ggml (big-endian)
-            Data([0x6c, 0x6d, 0x67, 0x67]), // ggml (little-endian, ARM Mac)
-            Data([0x47, 0x47, 0x55, 0x46]), // GGUF
-            Data([0x46, 0x55, 0x47, 0x47]), // GGUF (little-endian)
-            Data([0x67, 0x67, 0x73, 0x74]), // ggst (big-endian)
-            Data([0x74, 0x73, 0x67, 0x67]), // ggst (little-endian)
-        ]
-        guard validMagics.contains(magic) else {
-            let hex = magic.map { String(format: "%02X", $0) }.joined(separator: " ")
-            throw ImportError.invalidFormat(hex: hex)
-        }
+    // Run whisper-cli with the candidate model file against a silent WAV.
+    // Validates actual usability — exits non-zero if the model fails to load.
+    func validateModelWorks(_ model: WhisperModel, at url: URL) async throws {
+        guard let whisperBin = whisperPath else { throw WhisperError.binaryNotFound }
+        let execDir = self.execDir
+        let silentWAV = makeSilentWAV()
+        let modelPath = url.path
+
+        try await Task.detached(priority: .userInitiated) {
+            let tmpWAV = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent(UUID().uuidString + "_validate.wav")
+            try silentWAV.write(to: tmpWAV)
+            defer { try? FileManager.default.removeItem(at: tmpWAV) }
+
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: whisperBin)
+            proc.arguments = ["-m", modelPath, "-f", tmpWAV.path, "--no-timestamps", "-t", "1"]
+            proc.standardOutput = FileHandle.nullDevice
+            let errPipe = Pipe()
+            proc.standardError = errPipe
+
+            var env = ProcessInfo.processInfo.environment
+            if let dir = execDir {
+                env["GGML_BACKEND_PATH"] = dir
+                env["DYLD_LIBRARY_PATH"] = "\(dir):\(env["DYLD_LIBRARY_PATH"] ?? "")"
+            }
+            proc.environment = env
+
+            try proc.run()
+            proc.waitUntilExit()
+
+            if proc.terminationStatus != 0 {
+                let errOut = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                let reason = errOut.components(separatedBy: .newlines)
+                    .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                    .last(where: { $0.lowercased().contains("error") || $0.lowercased().contains("fail") })
+                    ?? errOut.components(separatedBy: .newlines).first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                    ?? "模型加载失败"
+                throw ImportError.modelLoadFailed(reason: String(reason.prefix(200)))
+            }
+        }.value
+    }
+
+    // 16 kHz mono 16-bit PCM WAV, 0.5 s of silence — minimal valid input for whisper
+    private func makeSilentWAV() -> Data {
+        // 8000 samples × 2 bytes = 16000 bytes of audio data
+        var d = Data([
+            0x52, 0x49, 0x46, 0x46,              // "RIFF"
+            0xA4, 0x3E, 0x00, 0x00,              // chunk size = 36 + 16000 = 16036
+            0x57, 0x41, 0x56, 0x45,              // "WAVE"
+            0x66, 0x6D, 0x74, 0x20,              // "fmt "
+            0x10, 0x00, 0x00, 0x00,              // fmt chunk size = 16
+            0x01, 0x00,                          // PCM
+            0x01, 0x00,                          // mono
+            0x80, 0x3E, 0x00, 0x00,              // sample rate = 16000
+            0x00, 0x7D, 0x00, 0x00,              // byte rate = 32000
+            0x02, 0x00,                          // block align = 2
+            0x10, 0x00,                          // bits per sample = 16
+            0x64, 0x61, 0x74, 0x61,              // "data"
+            0x80, 0x3E, 0x00, 0x00,              // data size = 16000
+        ])
+        d.append(Data(count: 16000))
+        return d
     }
 
     // Copy to models directory (call only after validateModel passes)
