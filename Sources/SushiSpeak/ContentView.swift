@@ -40,6 +40,7 @@ struct ContentView: View {
             recordingsPanel
         }
         .frame(minWidth: 360, minHeight: 520)
+        .background(WindowTitleHider())
         .onAppear {
             timeRemaining = totalSeconds
             recorder.preferredFormat = selectedFormat
@@ -57,8 +58,11 @@ struct ContentView: View {
 
     var headerBar: some View {
         HStack(spacing: 8) {
-            Text("🍣")
-                .font(.title2)
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 26, height: 26)
+                .cornerRadius(5)
             Text("SushiSpeak")
                 .font(.title2.weight(.semibold))
             Spacer()
@@ -509,6 +513,23 @@ struct RecordingRow: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + recording.duration + 0.5) {
                 isPlaying = false
             }
+        }
+    }
+}
+
+// MARK: - Window title hider
+
+struct WindowTitleHider: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            view.window?.titleVisibility = .hidden
+        }
+        return view
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            nsView.window?.titleVisibility = .hidden
         }
     }
 }
