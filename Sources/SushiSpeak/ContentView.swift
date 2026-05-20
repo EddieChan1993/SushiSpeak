@@ -344,17 +344,34 @@ struct ContentView: View {
 
         var lastImported: WhisperModel? = nil
         var errors: [String] = []
+        var importedModels: [WhisperModel] = []
 
         let expectedNames = WhisperModel.allCases.map { $0.fileName }.joined(separator: "\n  ")
 
         for url in panel.urls {
-            guard let target = WhisperModel.allCases.first(where: { url.lastPathComponent == $0.fileName }) else {
+            // Exact match first, then fuzzy (handles "ggml-small (1).bin", "ggml-small copy.bin", etc.)
+            let stem = url.deletingPathExtension().lastPathComponent
+            let target = WhisperModel.allCases.first(where: { url.lastPathComponent == $0.fileName })
+                      ?? WhisperModel.allCases.first(where: {
+                             let modelStem = String($0.fileName.dropLast(4))
+                             return stem.hasPrefix(modelStem + " ") || stem.hasPrefix(modelStem + "(")
+                         })
+
+            guard let target else {
                 errors.append("「\(url.lastPathComponent)」文件名不符合要求。\n仅支持以下文件名：\n  \(expectedNames)")
                 continue
             }
+
+            // Warn about duplicate models in the same batch
+            if importedModels.contains(target) {
+                errors.append("「\(url.lastPathComponent)」与已选文件重复（\(target.shortName)），已跳过。")
+                continue
+            }
+
             do {
                 try whisper.importModel(target, from: url)
                 lastImported = target
+                importedModels.append(target)
             } catch {
                 errors.append("「\(url.lastPathComponent)」：\(error.localizedDescription)")
             }
