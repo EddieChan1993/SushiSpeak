@@ -342,49 +342,56 @@ struct ContentView: View {
         panel.allowedContentTypes = []
         guard panel.runModal() == .OK else { return }
 
-        var lastImported: WhisperModel? = nil
-        var errors: [String] = []
-        var importedModels: [WhisperModel] = []
-
         let expectedNames = WhisperModel.allCases.map { $0.fileName }.joined(separator: "\n  ")
 
+        // Phase 1: detect model for every file + check for duplicates
+        var plan: [(url: URL, model: WhisperModel)] = []
+        var errors: [String] = []
+
         for url in panel.urls {
-            // Exact match first, then fuzzy (handles "ggml-small (1).bin", "ggml-small copy.bin", etc.)
             let stem = url.deletingPathExtension().lastPathComponent
-            let target = WhisperModel.allCases.first(where: { url.lastPathComponent == $0.fileName })
-                      ?? WhisperModel.allCases.first(where: {
-                             let modelStem = String($0.fileName.dropLast(4))
-                             return stem.hasPrefix(modelStem + " ") || stem.hasPrefix(modelStem + "(")
-                         })
-
-            guard let target else {
-                errors.append("「\(url.lastPathComponent)」文件名不符合要求。\n仅支持以下文件名：\n  \(expectedNames)")
+            let detected = WhisperModel.allCases.first(where: { url.lastPathComponent == $0.fileName })
+                        ?? WhisperModel.allCases.first(where: {
+                               let base = String($0.fileName.dropLast(4))
+                               return stem.hasPrefix(base + " ") || stem.hasPrefix(base + "(")
+                           })
+            guard let model = detected else {
+                errors.append("「\(url.lastPathComponent)」文件名不符合要求。\n支持的文件名：\n  \(expectedNames)")
                 continue
             }
-
-            // Warn about duplicate models in the same batch
-            if importedModels.contains(target) {
-                errors.append("「\(url.lastPathComponent)」与已选文件重复（\(target.shortName)），已跳过。")
+            if plan.contains(where: { $0.model == detected }) {
+                errors.append("「\(url.lastPathComponent)」与已选文件重复（\(model.shortName)）。")
                 continue
             }
+            plan.append((url, model))
+        }
 
-            do {
-                try whisper.importModel(target, from: url)
-                lastImported = target
-                importedModels.append(target)
-            } catch {
-                errors.append("「\(url.lastPathComponent)」：\(error.localizedDescription)")
+        // Phase 2: validate all files (size + magic bytes) — still no copying
+        if errors.isEmpty {
+            for item in plan {
+                do {
+                    try whisper.validateModel(item.model, at: item.url)
+                } catch {
+                    errors.append("「\(item.url.lastPathComponent)」：\(error.localizedDescription)")
+                }
             }
         }
 
-        // Switch picker to the last successfully imported model
-        if let last = lastImported {
-            whisperModelRaw = last.rawValue
-        }
-
+        // If any error in either phase: abort everything, show errors
         if !errors.isEmpty {
             importErrorMsg = errors.joined(separator: "\n\n")
             showImportError = true
+            return
+        }
+
+        // Phase 3: all checks passed — copy files
+        var lastImported: WhisperModel? = nil
+        for item in plan {
+            try? whisper.importModel(item.model, from: item.url)
+            lastImported = item.model
+        }
+        if let last = lastImported {
+            whisperModelRaw = last.rawValue
         }
     }
 }

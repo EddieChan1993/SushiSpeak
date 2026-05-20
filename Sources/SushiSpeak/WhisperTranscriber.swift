@@ -168,25 +168,21 @@ class WhisperTranscriber: ObservableObject {
         }
     }
 
-    func importModel(_ model: WhisperModel, from sourceURL: URL) throws {
-        // 1. Check file size
-        let attrs = try FileManager.default.attributesOfItem(atPath: sourceURL.path)
+    // Validate only — does NOT copy the file
+    func validateModel(_ model: WhisperModel, at url: URL) throws {
+        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
         let fileSize = (attrs[.size] as? Int64) ?? 0
-        let fileMB = Int(fileSize / 1_000_000)
         guard fileSize >= model.minimumFileSize else {
-            throw ImportError.fileTooSmall(model: model, actualMB: fileMB)
+            throw ImportError.fileTooSmall(model: model, actualMB: Int(fileSize / 1_000_000))
         }
-
-        // 2. Check magic bytes — GGML ("ggml") or GGUF ("GGUF") or legacy ("ggst")
-        guard let handle = FileHandle(forReadingAtPath: sourceURL.path) else {
+        guard let handle = FileHandle(forReadingAtPath: url.path) else {
             throw ImportError.cannotRead
         }
         let magic = handle.readData(ofLength: 4)
         handle.closeFile()
-
         let validMagics: [Data] = [
-            Data([0x67, 0x67, 0x6d, 0x6c]), // ggml (big-endian text)
-            Data([0x6c, 0x6d, 0x67, 0x67]), // ggml (little-endian uint32, ARM Mac)
+            Data([0x67, 0x67, 0x6d, 0x6c]), // ggml (big-endian)
+            Data([0x6c, 0x6d, 0x67, 0x67]), // ggml (little-endian, ARM Mac)
             Data([0x47, 0x47, 0x55, 0x46]), // GGUF
             Data([0x46, 0x55, 0x47, 0x47]), // GGUF (little-endian)
             Data([0x67, 0x67, 0x73, 0x74]), // ggst (big-endian)
@@ -196,8 +192,10 @@ class WhisperTranscriber: ObservableObject {
             let hex = magic.map { String(format: "%02X", $0) }.joined(separator: " ")
             throw ImportError.invalidFormat(hex: hex)
         }
+    }
 
-        // 3. Copy to models directory
+    // Copy to models directory (call only after validateModel passes)
+    func importModel(_ model: WhisperModel, from sourceURL: URL) throws {
         let dest = modelPath(for: model)
         if FileManager.default.fileExists(atPath: dest.path) {
             try FileManager.default.removeItem(at: dest)
