@@ -513,15 +513,10 @@ struct RecordingRow: View {
             } message: {
                 Text(transcribeError ?? "未知错误")
             }
-            .confirmationDialog(
-                "下载 \(whisperModel.displayName) 模型？",
-                isPresented: $showDownloadConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("下载") { whisper.downloadModel(whisperModel) }
-                Button("取消", role: .cancel) {}
+            .alert("模型未导入", isPresented: $showDownloadConfirm) {
+                Button("好") {}
             } message: {
-                Text("转录需要先下载 Whisper \(whisperModel.shortName) 模型。")
+                Text("请先在 Recordings 栏头部点击 📁 导入 \(whisperModel.shortName) 模型。")
             }
             .sheet(isPresented: $showTranscriptSheet) {
                 TranscriptSheet(text: transcriptText, isPresented: $showTranscriptSheet)
