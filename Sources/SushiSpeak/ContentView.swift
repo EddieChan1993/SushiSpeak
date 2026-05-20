@@ -541,7 +541,7 @@ struct RecordingRow: View {
                 Group {
                     switch transcribeState {
                     case .idle:
-                        Image(systemName: "waveform.and.mic")
+                        Image(systemName: "captions.bubble")
                             .foregroundStyle(transcribeHovered ? Color.accentColor : Color.secondary)
                     case .loading:
                         ProgressView().controlSize(.mini)
