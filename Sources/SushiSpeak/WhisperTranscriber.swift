@@ -185,9 +185,12 @@ class WhisperTranscriber: ObservableObject {
         handle.closeFile()
 
         let validMagics: [Data] = [
-            Data([0x67, 0x67, 0x6d, 0x6c]), // ggml
+            Data([0x67, 0x67, 0x6d, 0x6c]), // ggml (big-endian text)
+            Data([0x6c, 0x6d, 0x67, 0x67]), // ggml (little-endian uint32, ARM Mac)
             Data([0x47, 0x47, 0x55, 0x46]), // GGUF
-            Data([0x67, 0x67, 0x73, 0x74]), // ggst
+            Data([0x46, 0x55, 0x47, 0x47]), // GGUF (little-endian)
+            Data([0x67, 0x67, 0x73, 0x74]), // ggst (big-endian)
+            Data([0x74, 0x73, 0x67, 0x67]), // ggst (little-endian)
         ]
         guard validMagics.contains(magic) else {
             let hex = magic.map { String(format: "%02X", $0) }.joined(separator: " ")
