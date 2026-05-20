@@ -15,7 +15,6 @@ struct ContentView: View {
     @State private var timerTask: Task<Void, Never>?
     @State private var startHovered = false
     @State private var showDeleteConfirm = false
-    @State private var downloadHovered = false
     @State private var importHovered = false
     @State private var importErrorMsg: String? = nil
     @State private var showImportError = false
@@ -171,67 +170,45 @@ struct ContentView: View {
 
                 Spacer()
 
-                // Whisper model picker + download status
-                if let progress = whisper.downloadProgress {
-                    HStack(spacing: 6) {
-                        ProgressView(value: progress)
-                            .frame(width: 70)
-                        Text("\(Int(progress * 100))%")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 30, alignment: .trailing)
-                        Button { whisper.cancelDownload() } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
+                // Whisper model picker + import
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Picker("", selection: $whisperModelRaw) {
+                        ForEach(WhisperModel.allCases) { m in
+                            HStack {
+                                Text(m.shortName)
+                                if whisper.isModelAvailable(m) {
+                                    Image(systemName: "checkmark")
+                                }
+                            }.tag(m.rawValue)
                         }
-                        .buttonStyle(.plain)
                     }
-                } else {
-                    HStack(spacing: 6) {
-                        Image(systemName: "waveform")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    .labelsHidden()
+                    .frame(width: 90)
 
-                        Picker("", selection: $whisperModelRaw) {
-                            ForEach(WhisperModel.allCases) { m in
-                                Text(m.shortName).tag(m.rawValue)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 90)
-
-                        if !whisper.isModelAvailable(selectedWhisperModel) {
-                            // Download from internet
-                            Button { whisper.downloadModel(selectedWhisperModel) } label: {
-                                Image(systemName: "arrow.down.circle.fill")
-                                    .foregroundStyle(downloadHovered ? Color.accentColor : Color.secondary)
-                                    .scaleEffect(downloadHovered ? 1.2 : 1.0)
-                                    .animation(.spring(response: 0.15), value: downloadHovered)
-                            }
-                            .buttonStyle(.plain)
-                            .help("在线下载 \(selectedWhisperModel.displayName)\n也可从 huggingface.co/ggerganov/whisper.cpp 手动下载后点击右侧导入")
-                            .onHover { downloadHovered = $0 }
-
-                            // Import from local file
-                            Button { importModelFile() } label: {
-                                Image(systemName: "folder.badge.plus")
-                                    .foregroundStyle(importHovered ? Color.accentColor : Color.secondary)
-                                    .scaleEffect(importHovered ? 1.2 : 1.0)
-                                    .animation(.spring(response: 0.15), value: importHovered)
-                            }
-                            .buttonStyle(.plain)
-                            .help("从本地导入 ggml-\(selectedWhisperModel.rawValue).bin")
-                            .onHover { importHovered = $0 }
-                            .alert("导入失败", isPresented: $showImportError) {
-                                Button("好") {}
-                            } message: {
-                                Text(importErrorMsg ?? "")
-                            }
-                        } else {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green.opacity(0.7))
-                                .font(.caption)
-                        }
+                    Button { importModelFile() } label: {
+                        Image(systemName: whisper.isModelAvailable(selectedWhisperModel)
+                              ? "checkmark.circle.fill" : "folder.badge.plus")
+                            .foregroundStyle(
+                                whisper.isModelAvailable(selectedWhisperModel)
+                                ? Color.green.opacity(0.8)
+                                : (importHovered ? Color.accentColor : Color.secondary)
+                            )
+                            .scaleEffect(importHovered && !whisper.isModelAvailable(selectedWhisperModel) ? 1.2 : 1.0)
+                            .animation(.spring(response: 0.15), value: importHovered)
+                    }
+                    .buttonStyle(.plain)
+                    .help(whisper.isModelAvailable(selectedWhisperModel)
+                          ? "\(selectedWhisperModel.shortName) 模型已就绪"
+                          : "导入 ggml-\(selectedWhisperModel.rawValue).bin\n从 huggingface.co/ggerganov/whisper.cpp 下载")
+                    .onHover { importHovered = $0 }
+                    .alert("导入失败", isPresented: $showImportError) {
+                        Button("好") {}
+                    } message: {
+                        Text(importErrorMsg ?? "")
                     }
                 }
 
