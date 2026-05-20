@@ -20,11 +20,38 @@ enum WhisperModel: String, CaseIterable, Identifiable {
     }
 
     var shortName: String { rawValue.capitalized }
-
     var fileName: String { "ggml-\(rawValue).bin" }
 
     var downloadURL: URL {
         URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(fileName)")!
+    }
+
+    // Minimum valid file size — rough lower bound to catch incomplete downloads
+    var minimumFileSize: Int64 {
+        switch self {
+        case .tiny:   return 50_000_000
+        case .base:   return 100_000_000
+        case .small:  return 350_000_000
+        case .medium: return 1_000_000_000
+        case .large:  return 2_000_000_000
+        }
+    }
+}
+
+enum ImportError: LocalizedError {
+    case cannotRead
+    case fileTooSmall(model: WhisperModel, actualMB: Int)
+    case invalidFormat(hex: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .cannotRead:
+            return "无法读取文件，请检查文件权限。"
+        case .fileTooSmall(let model, let mb):
+            return "文件太小（\(mb) MB），可能是下载不完整或选错了文件。\n\(model.shortName) 模型应至少 \(model.minimumFileSize / 1_000_000) MB。"
+        case .invalidFormat(let hex):
+            return "不是有效的 Whisper 模型文件（文件头：\(hex)）。\n请确认从 huggingface.co/ggerganov/whisper.cpp 下载的是 ggml-*.bin 文件。"
+        }
     }
 }
 
@@ -142,6 +169,32 @@ class WhisperTranscriber: ObservableObject {
     }
 
     func importModel(_ model: WhisperModel, from sourceURL: URL) throws {
+        // 1. Check file size
+        let attrs = try FileManager.default.attributesOfItem(atPath: sourceURL.path)
+        let fileSize = (attrs[.size] as? Int64) ?? 0
+        let fileMB = Int(fileSize / 1_000_000)
+        guard fileSize >= model.minimumFileSize else {
+            throw ImportError.fileTooSmall(model: model, actualMB: fileMB)
+        }
+
+        // 2. Check magic bytes — GGML ("ggml") or GGUF ("GGUF") or legacy ("ggst")
+        guard let handle = FileHandle(forReadingAtPath: sourceURL.path) else {
+            throw ImportError.cannotRead
+        }
+        let magic = handle.readData(ofLength: 4)
+        handle.closeFile()
+
+        let validMagics: [Data] = [
+            Data([0x67, 0x67, 0x6d, 0x6c]), // ggml
+            Data([0x47, 0x47, 0x55, 0x46]), // GGUF
+            Data([0x67, 0x67, 0x73, 0x74]), // ggst
+        ]
+        guard validMagics.contains(magic) else {
+            let hex = magic.map { String(format: "%02X", $0) }.joined(separator: " ")
+            throw ImportError.invalidFormat(hex: hex)
+        }
+
+        // 3. Copy to models directory
         let dest = modelPath(for: model)
         if FileManager.default.fileExists(atPath: dest.path) {
             try FileManager.default.removeItem(at: dest)
