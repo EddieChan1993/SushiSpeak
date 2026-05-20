@@ -15,7 +15,7 @@ struct ContentView: View {
     @State private var timerTask: Task<Void, Never>?
     @State private var startHovered = false
     @State private var showDeleteConfirm = false
-    @State private var showModelPicker = false
+    @State private var downloadHovered = false
 
     var selectedFormat: AudioFormat {
         AudioFormat(rawValue: audioFormatRaw) ?? .mp3
@@ -166,11 +166,11 @@ struct ContentView: View {
                 if let progress = whisper.downloadProgress {
                     HStack(spacing: 6) {
                         ProgressView(value: progress)
-                            .frame(width: 60)
+                            .frame(width: 70)
                         Text("\(Int(progress * 100))%")
-                            .font(.caption)
+                            .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                            .frame(width: 30, alignment: .trailing)
                         Button { whisper.cancelDownload() } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundStyle(.secondary)
@@ -178,37 +178,33 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                     }
                 } else {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 6) {
                         Image(systemName: "waveform")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+
                         Picker("", selection: $whisperModelRaw) {
                             ForEach(WhisperModel.allCases) { m in
-                                HStack {
-                                    Text(m.shortName)
-                                    if !whisper.isModelAvailable(m) {
-                                        Image(systemName: "arrow.down.circle")
-                                    }
-                                }.tag(m.rawValue)
+                                Text(m.shortName).tag(m.rawValue)
                             }
                         }
                         .labelsHidden()
-                        .frame(width: 80)
-                        .onChange(of: whisperModelRaw) { _ in
-                            if !whisper.isModelAvailable(selectedWhisperModel) {
-                                whisper.downloadModel(selectedWhisperModel)
-                            }
-                        }
+                        .frame(width: 90)
 
                         if !whisper.isModelAvailable(selectedWhisperModel) {
-                            Button {
-                                whisper.downloadModel(selectedWhisperModel)
-                            } label: {
-                                Image(systemName: "arrow.down.circle")
-                                    .foregroundStyle(Color.accentColor)
+                            Button { whisper.downloadModel(selectedWhisperModel) } label: {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .foregroundStyle(downloadHovered ? Color.accentColor : Color.secondary)
+                                    .scaleEffect(downloadHovered ? 1.2 : 1.0)
+                                    .animation(.spring(response: 0.15), value: downloadHovered)
                             }
                             .buttonStyle(.plain)
                             .help("Download \(selectedWhisperModel.displayName)")
+                            .onHover { downloadHovered = $0 }
+                        } else {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green.opacity(0.7))
+                                .font(.caption)
                         }
                     }
                 }
@@ -376,9 +372,12 @@ struct RecordingRow: View {
     @State private var transcribeState: TranscribeState = .idle
     @State private var deleteHovered = false
     @State private var showDeleteConfirm = false
+    @State private var showDownloadConfirm = false
+    @State private var showTranscriptSheet = false
+    @State private var transcriptText = ""
 
     enum TranscribeState {
-        case idle, loading, done, failed
+        case idle, loading, failed
     }
 
     var formatBadgeColor: Color {
@@ -430,33 +429,41 @@ struct RecordingRow: View {
             .help("Show in Finder")
             .onHover { folderHovered = $0 }
 
-            Button { transcribeAndCopy() } label: {
+            Button { transcribeTapped() } label: {
                 Group {
                     switch transcribeState {
                     case .idle:
                         Image(systemName: "waveform.and.mic")
+                            .foregroundStyle(transcribeHovered ? Color.accentColor : Color.secondary)
                     case .loading:
                         ProgressView().controlSize(.mini)
-                    case .done:
-                        Image(systemName: "checkmark")
                     case .failed:
-                        Image(systemName: "xmark")
+                        Image(systemName: "xmark.circle")
+                            .foregroundStyle(Color.red)
                     }
                 }
-                .foregroundStyle(
-                    transcribeState == .done ? Color.green :
-                    transcribeState == .failed ? Color.red :
-                    transcribeHovered ? Color.accentColor : Color.secondary
-                )
-                .scaleEffect(transcribeHovered ? 1.15 : 1.0)
+                .scaleEffect(transcribeHovered && transcribeState == .idle ? 1.15 : 1.0)
                 .animation(.spring(response: 0.15), value: transcribeHovered)
                 .animation(.spring(response: 0.15), value: transcribeState)
                 .frame(width: 16)
             }
             .buttonStyle(.plain)
-            .help("Transcribe and copy text to clipboard")
+            .help(whisper.isModelAvailable(whisperModel) ? "Transcribe audio" : "Download model to transcribe")
             .onHover { transcribeHovered = $0 }
             .disabled(transcribeState == .loading)
+            .confirmationDialog(
+                "下载 \(whisperModel.displayName) 模型？",
+                isPresented: $showDownloadConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("下载") { whisper.downloadModel(whisperModel) }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("转录需要先下载 Whisper \(whisperModel.shortName) 模型。")
+            }
+            .sheet(isPresented: $showTranscriptSheet) {
+                TranscriptSheet(text: transcriptText, isPresented: $showTranscriptSheet)
+            }
 
             Button { showDeleteConfirm = true } label: {
                 Image(systemName: "trash")
@@ -480,16 +487,23 @@ struct RecordingRow: View {
         NSWorkspace.shared.activateFileViewerSelecting([recording.url])
     }
 
-    func transcribeAndCopy() {
+    func transcribeTapped() {
+        if whisper.isModelAvailable(whisperModel) {
+            doTranscribe()
+        } else {
+            showDownloadConfirm = true
+        }
+    }
+
+    func doTranscribe() {
         transcribeState = .loading
         Task {
             do {
                 let text = try await whisper.transcribe(url: recording.url, model: whisperModel)
                 await MainActor.run {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                    transcribeState = .done
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { transcribeState = .idle }
+                    transcriptText = text
+                    transcribeState = .idle
+                    showTranscriptSheet = true
                 }
             } catch {
                 await MainActor.run {
@@ -514,6 +528,65 @@ struct RecordingRow: View {
                 isPlaying = false
             }
         }
+    }
+}
+
+// MARK: - Transcript Sheet
+
+struct TranscriptSheet: View {
+    let text: String
+    @Binding var isPresented: Bool
+    @State private var copied = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("识别结果")
+                    .font(.headline)
+                Spacer()
+                Button { isPresented = false } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+
+            Divider()
+
+            ScrollView {
+                Text(text)
+                    .textSelection(.enabled)
+                    .font(.body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+            }
+            .frame(maxHeight: .infinity)
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                } label: {
+                    Label(copied ? "已复制" : "复制", systemImage: copied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .tint(copied ? .green : .accentColor)
+
+                Button("关闭") { isPresented = false }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+        }
+        .frame(width: 420, height: 320)
     }
 }
 
