@@ -8,7 +8,7 @@ struct Recording: Identifiable {
 
     var formattedDate: String {
         let f = DateFormatter()
-        f.dateFormat = "MM-dd HH:mm:ss"
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return f.string(from: date)
     }
 

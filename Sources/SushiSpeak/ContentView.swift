@@ -336,17 +336,23 @@ struct ContentView: View {
     func importModelFile() {
         let panel = NSOpenPanel()
         panel.title = "选择 Whisper 模型文件"
-        panel.message = "请选择 ggml-\(selectedWhisperModel.rawValue).bin 文件\n（从 huggingface.co/ggerganov/whisper.cpp 下载）"
+        panel.message = "选择 ggml-*.bin 文件（将自动识别模型类型）"
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.allowedContentTypes = []
-        if panel.runModal() == .OK, let url = panel.url {
-            do {
-                try whisper.importModel(selectedWhisperModel, from: url)
-            } catch {
-                importErrorMsg = error.localizedDescription
-                showImportError = true
-            }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        // Auto-detect model from filename, fall back to current selection
+        let detected = WhisperModel.allCases.first { url.lastPathComponent == $0.fileName }
+        let target = detected ?? selectedWhisperModel
+
+        do {
+            try whisper.importModel(target, from: url)
+            // Switch picker to match the actual imported model
+            whisperModelRaw = target.rawValue
+        } catch {
+            importErrorMsg = error.localizedDescription
+            showImportError = true
         }
     }
 }
