@@ -179,16 +179,16 @@ struct ContentView: View {
 
                     Picker("", selection: $whisperModelRaw) {
                         ForEach(WhisperModel.allCases) { m in
-                            HStack {
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(whisper.isModelAvailable(m) ? Color.green : Color.clear)
+                                    .frame(width: 6, height: 6)
                                 Text(m.shortName)
-                                if whisper.isModelAvailable(m) {
-                                    Image(systemName: "checkmark")
-                                }
                             }.tag(m.rawValue)
                         }
                     }
                     .labelsHidden()
-                    .frame(width: 90)
+                    .frame(width: 100)
 
                     // Open download page in browser
                     Button {
