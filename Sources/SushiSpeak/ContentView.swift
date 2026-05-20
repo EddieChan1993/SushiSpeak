@@ -16,6 +16,9 @@ struct ContentView: View {
     @State private var startHovered = false
     @State private var showDeleteConfirm = false
     @State private var downloadHovered = false
+    @State private var importHovered = false
+    @State private var importErrorMsg: String? = nil
+    @State private var showImportError = false
 
     var selectedFormat: AudioFormat {
         AudioFormat(rawValue: audioFormatRaw) ?? .mp3
@@ -198,6 +201,7 @@ struct ContentView: View {
                         .frame(width: 90)
 
                         if !whisper.isModelAvailable(selectedWhisperModel) {
+                            // Download from internet
                             Button { whisper.downloadModel(selectedWhisperModel) } label: {
                                 Image(systemName: "arrow.down.circle.fill")
                                     .foregroundStyle(downloadHovered ? Color.accentColor : Color.secondary)
@@ -205,8 +209,24 @@ struct ContentView: View {
                                     .animation(.spring(response: 0.15), value: downloadHovered)
                             }
                             .buttonStyle(.plain)
-                            .help("Download \(selectedWhisperModel.displayName)")
+                            .help("在线下载 \(selectedWhisperModel.displayName)\n也可从 huggingface.co/ggerganov/whisper.cpp 手动下载后点击右侧导入")
                             .onHover { downloadHovered = $0 }
+
+                            // Import from local file
+                            Button { importModelFile() } label: {
+                                Image(systemName: "folder.badge.plus")
+                                    .foregroundStyle(importHovered ? Color.accentColor : Color.secondary)
+                                    .scaleEffect(importHovered ? 1.2 : 1.0)
+                                    .animation(.spring(response: 0.15), value: importHovered)
+                            }
+                            .buttonStyle(.plain)
+                            .help("从本地导入 ggml-\(selectedWhisperModel.rawValue).bin")
+                            .onHover { importHovered = $0 }
+                            .alert("导入失败", isPresented: $showImportError) {
+                                Button("好") {}
+                            } message: {
+                                Text(importErrorMsg ?? "")
+                            }
                         } else {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.green.opacity(0.7))
@@ -305,6 +325,23 @@ struct ContentView: View {
         isRunning = false
         recorder.stopRecording()
         timeRemaining = totalSeconds
+    }
+
+    func importModelFile() {
+        let panel = NSOpenPanel()
+        panel.title = "选择 Whisper 模型文件"
+        panel.message = "请选择 ggml-\(selectedWhisperModel.rawValue).bin 文件\n（从 huggingface.co/ggerganov/whisper.cpp 下载）"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = []
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try whisper.importModel(selectedWhisperModel, from: url)
+            } catch {
+                importErrorMsg = error.localizedDescription
+                showImportError = true
+            }
+        }
     }
 }
 
