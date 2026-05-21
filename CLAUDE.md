@@ -26,6 +26,37 @@ Assets/
 generate_icon.swift          — Swift script to redraw the icon (Core Graphics, no deps)
 ```
 
+## Recordings list UI
+
+- Grouped by **year-month** section headers ("2026年05月"), newest month first. Each group sorted newest-first.
+- Recording date format: `MM-dd HH:mm:ss` (year omitted — already shown in section header).
+- **Double-click** a row to play/pause (no per-row play button).
+- Currently playing row is highlighted with `accentColor.opacity(0.75)`; text and badge flip to white.
+- Recordings header bar uses `windowBackgroundColor` to visually separate it from the list.
+
+## PlayerBar (always-visible bottom playback strip)
+
+`AudioPlayer` (`ObservableObject`) manages a single shared `AVAudioPlayer`:
+- `toggle(_:)` — play new recording or pause/resume current
+- `seek(to:)` — scrub; updates `currentTime` immediately
+- `volume: Float` (default **0.3**) — applied to `player.volume` via `didSet`
+- `scrollTargetID: UUID?` — set when PlayerBar play button is tapped; `ScrollViewReader` observes it to scroll the list to the playing row
+
+`PlayerBar` layout (always shown, even with no active recording):
+```
+[play/pause]  [────── slider ──────]  [volume🔊]
+              [name]          [time]
+```
+- Play/pause and volume buttons disabled/dimmed when nothing is loaded
+- Volume popover: vertical slider + percentage label
+- Volume icon cycles through `speaker.slash` / `speaker` / `speaker.wave.1` / `speaker.wave.3`
+
+## Transcript sheet
+
+- Uses `SelectableTextView` (`NSViewRepresentable` wrapping `NSTextView`) — `isEditable = false`, `isSelectable = true`
+- Supports drag-to-select, `Cmd+A`, right-click copy
+- Bottom toolbar: "复制" (copy all) + "关闭"
+
 ## Key decisions & rationale
 
 ### Audio recording: AVAudioEngine (not AVAudioRecorder)
@@ -44,10 +75,10 @@ User selects format via picker in the timer panel; stored in `@AppStorage("audio
 **豆包 compatibility**: WAV rejected, AAC rejected. MP3 works.
 
 ### Whisper transcription (whisper-cpp)
-Clicking the `captions.bubble` button in each recording row:
+Clicking the `captions.bubble` button in each recording row (right-side action icons):
 1. ffmpeg converts audio → 16kHz mono WAV (best accuracy for whisper)
 2. `whisper-cli -m model.bin -f audio.wav -l auto --no-timestamps` runs
-3. Transcript shown in a sheet with selectable text + copy button
+3. Transcript shown in `TranscriptSheet` — `NSTextView`-backed, fully selectable
 
 **Context awareness**: `--prompt` flag available; currently unused (pass previous transcript for continuity).
 **Language**: `-l auto` handles Chinese, English, mixed.
