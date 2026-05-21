@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var timeRemaining = 0
     @State private var isRunning = false
     @State private var timerTask: Task<Void, Never>?
+    @AppStorage("hideTimer") private var hideTimer = false
     @State private var startHovered = false
     @State private var showDeleteConfirm = false
     @State private var importHovered = false
@@ -23,6 +24,9 @@ struct ContentView: View {
     @State private var showModelInfo = false
     @State private var deleteModelHovered = false
     @State private var showDeleteModelConfirm = false
+    @State private var pendingAutoTranscribe = false
+    @State private var showAutoTranscript = false
+    @State private var autoTranscriptText = ""
 
     var selectedFormat: AudioFormat {
         AudioFormat(rawValue: audioFormatRaw) ?? .mp3
@@ -58,6 +62,24 @@ struct ContentView: View {
         .onChange(of: audioFormatRaw) { _ in
             recorder.preferredFormat = selectedFormat
         }
+        .onChange(of: recorder.recordings.first?.id) { newID in
+            guard pendingAutoTranscribe, newID != nil,
+                  whisper.isModelAvailable(selectedWhisperModel),
+                  let rec = recorder.recordings.first else {
+                pendingAutoTranscribe = false
+                return
+            }
+            pendingAutoTranscribe = false
+            Task {
+                if let text = try? await whisper.transcribe(url: rec.url, model: selectedWhisperModel) {
+                    autoTranscriptText = text
+                    showAutoTranscript = true
+                }
+            }
+        }
+        .sheet(isPresented: $showAutoTranscript) {
+            TranscriptSheet(text: autoTranscriptText, isPresented: $showAutoTranscript)
+        }
         .onDisappear {
             timerTask?.cancel()
             if isRunning { recorder.stopRecording() }
@@ -76,7 +98,9 @@ struct ContentView: View {
             Text("SushiSpeak")
                 .font(.title2.weight(.semibold))
             Spacer()
+            modelPickerControls
             if isRunning {
+                Divider().frame(height: 16)
                 RecordingBadge()
             }
         }
@@ -84,15 +108,96 @@ struct ContentView: View {
         .padding(.vertical, 14)
     }
 
+    var modelPickerControls: some View {
+        HStack(spacing: 6) {
+            Button { showModelInfo = true } label: {
+                Image(systemName: "globe")
+                    .foregroundStyle(linkHovered ? Color.accentColor : Color.secondary)
+                    .scaleEffect(linkHovered ? 1.15 : 1.0)
+                    .animation(.spring(response: 0.15), value: linkHovered)
+            }
+            .buttonStyle(.plain)
+            .help("查看下载地址")
+            .onHover { linkHovered = $0 }
+            .popover(isPresented: $showModelInfo, arrowEdge: .bottom) {
+                ModelInfoPopover(model: selectedWhisperModel, isPresented: $showModelInfo)
+            }
+
+            Picker("", selection: $whisperModelRaw) {
+                ForEach(WhisperModel.allCases) { m in
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(whisper.isModelAvailable(m) ? Color.green : Color.clear)
+                            .frame(width: 6, height: 6)
+                        Text(m.shortName)
+                    }.tag(m.rawValue)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 100)
+
+            if isValidatingImport {
+                ProgressView().controlSize(.small).help("正在验证模型…")
+            } else if !whisper.isModelAvailable(selectedWhisperModel) {
+                Button { importModelFile() } label: {
+                    Image(systemName: "folder.badge.plus")
+                        .foregroundStyle(importHovered ? Color.accentColor : Color.secondary)
+                        .scaleEffect(importHovered ? 1.15 : 1.0)
+                        .animation(.spring(response: 0.15), value: importHovered)
+                }
+                .buttonStyle(.plain)
+                .help("导入 ggml-\(selectedWhisperModel.rawValue).bin")
+                .onHover { importHovered = $0 }
+            } else {
+                Button { showDeleteModelConfirm = true } label: {
+                    Image(systemName: "trash")
+                        .foregroundStyle(deleteModelHovered ? Color.red : Color.secondary)
+                        .scaleEffect(deleteModelHovered ? 1.15 : 1.0)
+                        .animation(.spring(response: 0.15), value: deleteModelHovered)
+                }
+                .buttonStyle(.plain)
+                .help("删除 \(selectedWhisperModel.shortName) 模型文件")
+                .onHover { deleteModelHovered = $0 }
+                .confirmationDialog(
+                    "删除 \(selectedWhisperModel.shortName) 模型？",
+                    isPresented: $showDeleteModelConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("删除", role: .destructive) {
+                        try? whisper.deleteModel(selectedWhisperModel)
+                    }
+                } message: {
+                    Text("模型文件将从本地删除，下次使用需重新导入。")
+                }
+            }
+        }
+        .alert("导入失败", isPresented: $showImportError) {
+            Button("好") {}
+        } message: { Text(importErrorMsg ?? "") }
+    }
+
     // MARK: Timer Panel
 
     var timerPanel: some View {
         VStack(spacing: 18) {
-            Text(timeDisplay)
-                .font(.system(size: 88, weight: .ultraLight, design: .monospaced))
-                .foregroundStyle(isRunning ? Color.red : Color.primary)
-                .animation(.easeInOut(duration: 0.3), value: isRunning)
-                .padding(.top, 24)
+            ZStack(alignment: .trailing) {
+                Text(timeDisplay)
+                    .font(.system(size: 88, weight: .ultraLight, design: .monospaced))
+                    .foregroundStyle(isRunning ? Color.red : Color.primary)
+                    .animation(.easeInOut(duration: 0.3), value: isRunning)
+                    .opacity(hideTimer ? 0 : 1)
+                    .frame(maxWidth: .infinity)
+
+                Button { hideTimer.toggle() } label: {
+                    Image(systemName: hideTimer ? "eye.slash" : "eye")
+                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 13))
+                }
+                .buttonStyle(.plain)
+                .help(hideTimer ? "显示倒计时" : "隐藏倒计时")
+                .padding(.trailing, 24)
+            }
+            .padding(.top, 24)
 
             ZStack {
                 WaveformView(level: recorder.audioLevel)
@@ -175,79 +280,7 @@ struct ContentView: View {
 
                 Spacer()
 
-                // Whisper model picker + import
-                HStack(spacing: 6) {
-                    // 🌐 Info popover — left of picker
-                    Button { showModelInfo = true } label: {
-                        Image(systemName: "globe")
-                            .foregroundStyle(linkHovered ? Color.accentColor : Color.secondary)
-                            .scaleEffect(linkHovered ? 1.15 : 1.0)
-                            .animation(.spring(response: 0.15), value: linkHovered)
-                    }
-                    .buttonStyle(.plain)
-                    .help("查看下载地址")
-                    .onHover { linkHovered = $0 }
-                    .popover(isPresented: $showModelInfo, arrowEdge: .bottom) {
-                        ModelInfoPopover(model: selectedWhisperModel, isPresented: $showModelInfo)
-                    }
-
-                    Picker("", selection: $whisperModelRaw) {
-                        ForEach(WhisperModel.allCases) { m in
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(whisper.isModelAvailable(m) ? Color.green : Color.clear)
-                                    .frame(width: 6, height: 6)
-                                Text(m.shortName)
-                            }.tag(m.rawValue)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 100)
-
-                    // 📁+ Import / ⏳ Validating / 🗑 Delete
-                    if isValidatingImport {
-                        ProgressView()
-                            .controlSize(.small)
-                            .help("正在验证模型…")
-                    } else if !whisper.isModelAvailable(selectedWhisperModel) {
-                        Button { importModelFile() } label: {
-                            Image(systemName: "folder.badge.plus")
-                                .foregroundStyle(importHovered ? Color.accentColor : Color.secondary)
-                                .scaleEffect(importHovered ? 1.15 : 1.0)
-                                .animation(.spring(response: 0.15), value: importHovered)
-                        }
-                        .buttonStyle(.plain)
-                        .help("导入 ggml-\(selectedWhisperModel.rawValue).bin")
-                        .onHover { importHovered = $0 }
-                    } else {
-                        Button { showDeleteModelConfirm = true } label: {
-                            Image(systemName: "trash")
-                                .foregroundStyle(deleteModelHovered ? Color.red : Color.secondary)
-                                .scaleEffect(deleteModelHovered ? 1.15 : 1.0)
-                                .animation(.spring(response: 0.15), value: deleteModelHovered)
-                        }
-                        .buttonStyle(.plain)
-                        .help("删除 \(selectedWhisperModel.shortName) 模型文件")
-                        .onHover { deleteModelHovered = $0 }
-                        .confirmationDialog(
-                            "删除 \(selectedWhisperModel.shortName) 模型？",
-                            isPresented: $showDeleteModelConfirm,
-                            titleVisibility: .visible
-                        ) {
-                            Button("删除", role: .destructive) {
-                                try? whisper.deleteModel(selectedWhisperModel)
-                            }
-                        } message: {
-                            Text("模型文件将从本地删除，下次使用需重新导入。")
-                        }
-                    }
-                }
-                .alert("导入失败", isPresented: $showImportError) {
-                    Button("好") {}
-                } message: { Text(importErrorMsg ?? "") }
-
                 if !recorder.recordings.isEmpty {
-                    Divider().frame(height: 16)
                     Button("Delete All") { showDeleteConfirm = true }
                         .foregroundStyle(.red)
                         .buttonStyle(.plain)
@@ -334,6 +367,7 @@ struct ContentView: View {
         timerTask?.cancel()
         timerTask = nil
         isRunning = false
+        pendingAutoTranscribe = true
         recorder.stopRecording()
         timeRemaining = totalSeconds
     }
