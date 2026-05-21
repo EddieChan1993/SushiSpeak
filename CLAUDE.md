@@ -61,7 +61,7 @@ Clicking the `captions.bubble` button in each recording row:
 | Medium | `ggml-medium.bin` | |
 | Large V3 | `ggml-large-v3.bin` | best accuracy |
 
-Model picker in recordings panel header. No auto-download — user imports `ggml-*.bin` files manually (download URL shown in 🌐 popover). Green dot on each picker item indicates model is present.
+Model picker lives in the **header bar** (right side, next to logo). No auto-download — user imports `ggml-*.bin` files manually (download URL shown in 🌐 popover). Green dot on each picker item indicates model is present.
 
 ### Model import — atomic, 3-phase
 
@@ -100,10 +100,20 @@ To regenerate: `cd ~/code/SushiSpeak && swift generate_icon.swift && iconutil -c
 `titleVisibility = .hidden` set via `WindowTitleHider` (`NSViewRepresentable`) applied as `.background()` on the root view. Keeps traffic-light buttons, removes the "SushiSpeak" title text. Header uses `NSApp.applicationIconImage` (the bundled `.icns`) resized to 26×26 pt.
 
 ### Timer settings persistence: @AppStorage
-`selectedMinutes`, `selectedSeconds`, `audioFormatRaw`, `whisperModelRaw` all use `@AppStorage` (UserDefaults).
+`selectedMinutes`, `selectedSeconds`, `audioFormatRaw`, `whisperModelRaw`, `hideTimer` all use `@AppStorage` (UserDefaults).
+
+### Hide-timer toggle
+Eye button overlaid on the timer display (trailing edge). When active, shows `--:--` in dim gray instead of the live countdown — layout is stable (same font/frame). Countdown continues normally. Useful for reducing anxiety during practice sessions.
 
 ### Waveform: RMS metering with noise gate
 Tap callback computes RMS per 4096-sample buffer. Noise gate: RMS < 0.012 → level = 0 (flat bars). Exponential smoothing (`old × 0.55 + new × 0.45`). `TimelineView(.animation)` drives 60 fps bar rendering.
+
+### Timer accuracy — wall-clock deadline + sync mic start
+Two fixes to ensure recording duration matches the set time:
+
+1. **Wall-clock deadline**: timer loop checks `endDate.timeIntervalSinceNow` every 500 ms instead of sleeping 1 s per tick. Avoids drift accumulation (~15 s over 5 min with the old approach).
+
+2. **Sync mic start**: `startRecording(onStarted:)` skips the async `requestAccess` callback when permission is already granted (normal case after first launch) and calls `doStart()` synchronously. `endDate` is set inside `onStarted`, i.e. the moment the mic actually opens — timer and recording are exactly aligned. On first launch (permission dialog), both still start together via the async path.
 
 ### Completion alert
 `NSSound(named: "Glass")?.play()` + `NSApp.requestUserAttention(.criticalRequest)`.
