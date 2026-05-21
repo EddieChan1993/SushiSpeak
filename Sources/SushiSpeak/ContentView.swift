@@ -322,13 +322,13 @@ struct ContentView: View {
         isRunning = true
         recorder.startRecording()
 
-        let duration = totalSeconds
+        let endDate = Date().addingTimeInterval(TimeInterval(totalSeconds))
         timerTask = Task { @MainActor in
-            for _ in 0..<duration {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            repeat {
+                try? await Task.sleep(nanoseconds: 500_000_000)
                 guard !Task.isCancelled else { return }
-                timeRemaining -= 1
-            }
+                timeRemaining = max(0, Int(endDate.timeIntervalSinceNow.rounded(.up)))
+            } while timeRemaining > 0 && !Task.isCancelled
             guard !Task.isCancelled else { return }
             stopSession()
             sendCompletionNotification()
