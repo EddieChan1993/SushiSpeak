@@ -50,10 +50,19 @@ class AudioRecorder: NSObject, ObservableObject {
         Task { await loadRecordings() }
     }
 
-    func startRecording() {
-        AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
-            guard granted, let self else { return }
-            DispatchQueue.main.async { self.doStart() }
+    func startRecording(onStarted: @escaping () -> Void = {}) {
+        // If already authorized, start synchronously to avoid async delay skewing the timer
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+            doStart()
+            onStarted()
+        } else {
+            AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+                guard granted, let self else { return }
+                DispatchQueue.main.async {
+                    self.doStart()
+                    onStarted()
+                }
+            }
         }
     }
 

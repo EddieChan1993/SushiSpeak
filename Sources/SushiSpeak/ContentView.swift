@@ -320,18 +320,21 @@ struct ContentView: View {
         guard totalSeconds > 0 else { return }
         timeRemaining = totalSeconds
         isRunning = true
-        recorder.startRecording()
 
-        let endDate = Date().addingTimeInterval(TimeInterval(totalSeconds))
-        timerTask = Task { @MainActor in
-            repeat {
-                try? await Task.sleep(nanoseconds: 500_000_000)
+        let duration = totalSeconds
+        recorder.startRecording {
+            // endDate starts from when the mic actually opens, not when the button was pressed
+            let endDate = Date().addingTimeInterval(TimeInterval(duration))
+            self.timerTask = Task { @MainActor in
+                repeat {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    guard !Task.isCancelled else { return }
+                    self.timeRemaining = max(0, Int(endDate.timeIntervalSinceNow.rounded(.up)))
+                } while self.timeRemaining > 0 && !Task.isCancelled
                 guard !Task.isCancelled else { return }
-                timeRemaining = max(0, Int(endDate.timeIntervalSinceNow.rounded(.up)))
-            } while timeRemaining > 0 && !Task.isCancelled
-            guard !Task.isCancelled else { return }
-            stopSession()
-            sendCompletionNotification()
+                self.stopSession()
+                self.sendCompletionNotification()
+            }
         }
     }
 
