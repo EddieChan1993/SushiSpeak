@@ -181,11 +181,11 @@ struct ContentView: View {
     var timerPanel: some View {
         VStack(spacing: 18) {
             ZStack(alignment: .trailing) {
-                Text(timeDisplay)
+                Text(hideTimer ? "--:--" : timeDisplay)
                     .font(.system(size: 88, weight: .ultraLight, design: .monospaced))
-                    .foregroundStyle(isRunning ? Color.red : Color.primary)
+                    .foregroundStyle(hideTimer ? Color.secondary.opacity(0.3) : (isRunning ? Color.red : Color.primary))
                     .animation(.easeInOut(duration: 0.3), value: isRunning)
-                    .opacity(hideTimer ? 0 : 1)
+                    .animation(.easeInOut(duration: 0.2), value: hideTimer)
                     .frame(maxWidth: .infinity)
 
                 Button { hideTimer.toggle() } label: {
