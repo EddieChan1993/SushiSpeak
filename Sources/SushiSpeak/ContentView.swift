@@ -24,9 +24,6 @@ struct ContentView: View {
     @State private var showModelInfo = false
     @State private var deleteModelHovered = false
     @State private var showDeleteModelConfirm = false
-    @State private var pendingAutoTranscribe = false
-    @State private var showAutoTranscript = false
-    @State private var autoTranscriptText = ""
 
     var selectedFormat: AudioFormat {
         AudioFormat(rawValue: audioFormatRaw) ?? .mp3
@@ -61,24 +58,6 @@ struct ContentView: View {
         }
         .onChange(of: audioFormatRaw) { _ in
             recorder.preferredFormat = selectedFormat
-        }
-        .onChange(of: recorder.recordings.first?.id) { newID in
-            guard pendingAutoTranscribe, newID != nil,
-                  whisper.isModelAvailable(selectedWhisperModel),
-                  let rec = recorder.recordings.first else {
-                pendingAutoTranscribe = false
-                return
-            }
-            pendingAutoTranscribe = false
-            Task {
-                if let text = try? await whisper.transcribe(url: rec.url, model: selectedWhisperModel) {
-                    autoTranscriptText = text
-                    showAutoTranscript = true
-                }
-            }
-        }
-        .sheet(isPresented: $showAutoTranscript) {
-            TranscriptSheet(text: autoTranscriptText, isPresented: $showAutoTranscript)
         }
         .onDisappear {
             timerTask?.cancel()
@@ -367,7 +346,6 @@ struct ContentView: View {
         timerTask?.cancel()
         timerTask = nil
         isRunning = false
-        pendingAutoTranscribe = true
         recorder.stopRecording()
         timeRemaining = totalSeconds
     }
