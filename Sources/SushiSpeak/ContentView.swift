@@ -160,10 +160,6 @@ struct ContentView: View {
                 .font(.title2.weight(.semibold))
             Spacer()
             modelPickerControls
-            if isRunning {
-                Divider().frame(height: 16)
-                RecordingBadge()
-            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
@@ -178,6 +174,7 @@ struct ContentView: View {
                     .animation(.spring(response: 0.15), value: linkHovered)
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .help("查看下载地址")
             .onHover { linkHovered = $0 }
             .popover(isPresented: $showModelInfo, arrowEdge: .bottom) {
@@ -196,6 +193,7 @@ struct ContentView: View {
             }
             .labelsHidden()
             .frame(width: 100)
+            .focusable(false)
 
             if isValidatingImport {
                 ProgressView().controlSize(.small).help("正在验证模型…")
@@ -207,6 +205,7 @@ struct ContentView: View {
                         .animation(.spring(response: 0.15), value: importHovered)
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
                 .help("导入 ggml-\(selectedWhisperModel.rawValue).bin")
                 .onHover { importHovered = $0 }
             } else {
@@ -217,6 +216,7 @@ struct ContentView: View {
                         .animation(.spring(response: 0.15), value: deleteModelHovered)
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
                 .help("删除 \(selectedWhisperModel.shortName) 模型文件")
                 .onHover { deleteModelHovered = $0 }
                 .confirmationDialog(
@@ -244,7 +244,7 @@ struct ContentView: View {
             ZStack(alignment: .trailing) {
                 Text(hideTimer ? "--:--" : timeDisplay)
                     .font(.system(size: 88, weight: .ultraLight, design: .monospaced))
-                    .foregroundStyle(hideTimer ? Color.secondary.opacity(0.3) : (isRunning ? Color.red : Color.primary))
+                    .foregroundStyle(isRunning ? Color.red : Color.primary)
                     .animation(.easeInOut(duration: 0.3), value: isRunning)
                     .animation(.easeInOut(duration: 0.2), value: hideTimer)
                     .frame(maxWidth: .infinity)
@@ -255,6 +255,7 @@ struct ContentView: View {
                         .font(.system(size: 13))
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
                 .help(hideTimer ? "显示倒计时" : "隐藏倒计时")
                 .padding(.trailing, 24)
             }
@@ -320,6 +321,7 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
             .tint(isRunning ? .red : .accentColor)
             .controlSize(.large)
+            .focusable(false)
             .environment(\.controlActiveState, .active)
             .scaleEffect(startHovered ? 1.05 : 1.0)
             .animation(.spring(response: 0.2, dampingFraction: 0.6), value: startHovered)
@@ -355,6 +357,7 @@ struct ContentView: View {
                     Button("Delete All") { showDeleteConfirm = true }
                         .foregroundStyle(.red)
                         .buttonStyle(.plain)
+                        .focusable(false)
                         .confirmationDialog(
                             "Delete all \(recorder.recordings.count) recordings?",
                             isPresented: $showDeleteConfirm,
@@ -381,35 +384,38 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
-                    List {
-                        ForEach(recordingsByMonth, id: \.key) { group in
-                            Section {
-                                ForEach(group.recordings) { rec in
-                                    RecordingRow(
-                                        recording: rec,
-                                        audioPlayer: audioPlayer,
-                                        whisper: whisper,
-                                        whisperModel: selectedWhisperModel,
-                                        onDelete: { recorder.delete(rec) }
-                                    )
-                                    .listRowInsets(EdgeInsets())
-
-                                    .id(rec.id)
+                    ScrollView {
+                        LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
+                            ForEach(recordingsByMonth, id: \.key) { group in
+                                Section {
+                                    ForEach(group.recordings) { rec in
+                                        RecordingRow(
+                                            recording: rec,
+                                            audioPlayer: audioPlayer,
+                                            whisper: whisper,
+                                            whisperModel: selectedWhisperModel,
+                                            onDelete: { recorder.delete(rec) }
+                                        )
+                                        .id(rec.id)
+                                        Divider()
+                                            .padding(.leading, 20)
+                                    }
+                                } header: {
+                                    Text(group.key)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 20)
+                                        .padding(.vertical, 3)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(.regularMaterial)
                                 }
-                            } header: {
-                                Text(group.key)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 20)
-                                    .padding(.vertical, 6)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }
-                    .listStyle(.plain)
+                    .background(ThinScrollBar())
                     .onChange(of: recorder.recordings.first?.id) { _ in
                         if let first = recorder.recordings.first {
-                            proxy.scrollTo(first.id, anchor: .top)
+                            proxy.scrollTo(first.id)
                         }
                     }
                     .onChange(of: audioPlayer.scrollTargetID) { id in
@@ -657,6 +663,7 @@ struct RecordingRow: View {
                     .animation(.spring(response: 0.15), value: folderHovered)
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .help("Show in Finder")
             .onHover { folderHovered = $0 }
 
@@ -679,6 +686,7 @@ struct RecordingRow: View {
                 .frame(width: 16)
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .help(whisper.isModelAvailable(whisperModel) ? "识别语音" : "请先导入模型")
             .onHover { transcribeHovered = $0 }
             .disabled(transcribeState == .loading)
@@ -703,6 +711,7 @@ struct RecordingRow: View {
                     .animation(.spring(response: 0.15), value: deleteHovered)
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .onHover { deleteHovered = $0 }
             .confirmationDialog("Delete \"\(recording.formattedDate)\"?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) { onDelete() }
@@ -710,6 +719,8 @@ struct RecordingRow: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .background(
             isSelected
                 ? Color.accentColor.opacity(0.75)
@@ -717,7 +728,7 @@ struct RecordingRow: View {
         )
         .animation(.easeInOut(duration: 0.15), value: isSelected)
         .onHover { isHovered = $0 }
-        .gesture(TapGesture(count: 2).onEnded { togglePlay() })
+        .simultaneousGesture(TapGesture(count: 2).onEnded { togglePlay() })
     }
 
     func revealInFinder() {
@@ -797,6 +808,7 @@ struct PlayerBar: View {
                                 : (audioPlayer.isPlaying ? Color.orange : Color.accentColor))
                     }
                     .buttonStyle(.plain)
+                    .focusable(false)
                     .disabled(audioPlayer.currentRecording == nil)
 
                     // Slider
@@ -807,15 +819,20 @@ struct PlayerBar: View {
                         )
                     )
                     .disabled(audioPlayer.currentRecording == nil)
+                    .focusable(false)
 
                     // Volume
                     Button { showVolume.toggle() } label: {
-                        Image(systemName: volumeIcon)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 20)
+                        HStack(spacing: 4) {
+                            Image(systemName: volumeIcon)
+                                .font(.system(size: 13))
+                            Text("\(Int(audioPlayer.volume * 100))%")
+                                .font(.system(size: 11, design: .monospaced))
+                        }
+                        .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .focusable(false)
                     .popover(isPresented: $showVolume, arrowEdge: .top) {
                         VStack(spacing: 8) {
                             Text("音量")
@@ -826,6 +843,7 @@ struct PlayerBar: View {
                                 set: { audioPlayer.volume = Float($0) }
                             ), in: 0...1)
                             .frame(width: 120)
+                            .focusable(false)
                             Text("\(Int(audioPlayer.volume * 100))%")
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(.secondary)
@@ -1024,6 +1042,7 @@ struct TranscriptSheet: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(copied ? .green : .accentColor)
+                .focusable(false)
                 .scaleEffect(copyHovered ? 1.05 : 1.0)
                 .animation(.spring(response: 0.15), value: copyHovered)
                 .onHover { copyHovered = $0 }
@@ -1033,6 +1052,29 @@ struct TranscriptSheet: View {
             .padding(.vertical, 14)
         }
         .frame(width: 420, height: 320)
+    }
+}
+
+// MARK: - Thin scroll bar helper
+
+struct ThinScrollBar: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { applyOverlayScroller(view) }
+        return view
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private func applyOverlayScroller(_ view: NSView) {
+        var v: NSView? = view
+        while let current = v {
+            if let scrollView = current as? NSScrollView {
+                scrollView.scrollerStyle = .overlay
+                scrollView.autohidesScrollers = true
+                return
+            }
+            v = current.superview
+        }
     }
 }
 
