@@ -320,6 +320,7 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
             .tint(isRunning ? .red : .accentColor)
             .controlSize(.large)
+            .environment(\.controlActiveState, .active)
             .scaleEffect(startHovered ? 1.05 : 1.0)
             .animation(.spring(response: 0.2, dampingFraction: 0.6), value: startHovered)
             .onHover { startHovered = $0 }
@@ -981,6 +982,8 @@ struct TranscriptSheet: View {
     let text: String
     @Binding var isPresented: Bool
     @State private var copied = false
+    @State private var closeHovered = false
+    @State private var copyHovered = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -988,6 +991,16 @@ struct TranscriptSheet: View {
                 Text("识别结果")
                     .font(.headline)
                 Spacer()
+                Button { isPresented = false } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(closeHovered ? Color.primary : Color.secondary)
+                        .scaleEffect(closeHovered ? 1.15 : 1.0)
+                        .animation(.spring(response: 0.15), value: closeHovered)
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .onHover { closeHovered = $0 }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
@@ -1011,9 +1024,10 @@ struct TranscriptSheet: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(copied ? .green : .accentColor)
+                .scaleEffect(copyHovered ? 1.05 : 1.0)
+                .animation(.spring(response: 0.15), value: copyHovered)
+                .onHover { copyHovered = $0 }
 
-                Button("关闭") { isPresented = false }
-                    .buttonStyle(.borderedProminent)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)

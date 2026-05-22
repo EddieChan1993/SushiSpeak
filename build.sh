@@ -31,8 +31,10 @@ CONTENTS="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS/MacOS"
 RESOURCES_DIR="$CONTENTS/Resources"
 
-rm -rf "$APP_BUNDLE"
-mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
+# Keep the .app directory itself so macOS TCC retains microphone permission
+# across rebuilds. Only wipe Contents/ to remove stale files.
+rm -rf "$CONTENTS"
+mkdir -p "$APP_BUNDLE" "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp "$BUILD_DIR/$BUILD_TYPE/$APP_NAME" "$MACOS_DIR/$APP_NAME"
 
