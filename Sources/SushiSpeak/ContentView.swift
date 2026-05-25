@@ -9,6 +9,7 @@ class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var currentTime: TimeInterval = 0
     @Published var duration: TimeInterval = 0
     @Published var scrollTargetID: UUID? = nil
+    @Published var currentNumber: Int = 0
     @Published var volume: Float = 0.3 {
         didSet { player?.volume = volume }
     }
@@ -342,6 +343,12 @@ struct ContentView: View {
         }
     }
 
+    // oldest = 1, newest = N
+    var recordingNumbers: [UUID: Int] {
+        let sorted = recorder.recordings.sorted { $0.date < $1.date }
+        return Dictionary(uniqueKeysWithValues: sorted.enumerated().map { ($1.id, $0 + 1) })
+    }
+
     var recordingsPanel: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -392,6 +399,7 @@ struct ContentView: View {
                                         RecordingRow(
                                             recording: rec,
                                             audioPlayer: audioPlayer,
+                                            number: recordingNumbers[rec.id] ?? 0,
                                             whisper: whisper,
                                             whisperModel: selectedWhisperModel,
                                             onDelete: { recorder.delete(rec) }
@@ -601,6 +609,7 @@ struct RecordingBadge: View {
 struct RecordingRow: View {
     let recording: Recording
     @ObservedObject var audioPlayer: AudioPlayer
+    let number: Int
     let whisper: WhisperTranscriber
     let whisperModel: WhisperModel
     let onDelete: () -> Void
@@ -636,6 +645,12 @@ struct RecordingRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            // Number badge
+            Text(String(format: "%03d", number))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(isSelected ? Color.white.opacity(0.8) : Color.secondary)
+                .frame(width: 28, alignment: .leading)
+
             VStack(alignment: .leading, spacing: 3) {
                 Text(recording.formattedDate)
                     .font(.system(size: 13, weight: .medium))
@@ -764,6 +779,7 @@ struct RecordingRow: View {
     }
 
     func togglePlay() {
+        audioPlayer.currentNumber = number
         audioPlayer.toggle(recording)
     }
 }
@@ -854,7 +870,9 @@ struct PlayerBar: View {
 
                 // Name + time below slider
                 HStack {
-                    Text(audioPlayer.currentRecording.map { $0.formattedDate } ?? "–")
+                    Text(audioPlayer.currentRecording != nil
+                         ? String(format: "#%03d · %@", audioPlayer.currentNumber, audioPlayer.currentRecording!.formattedDate)
+                         : "–")
                         .font(.caption)
                         .foregroundStyle(audioPlayer.currentRecording == nil ? .tertiary : .secondary)
                         .lineLimit(1)
