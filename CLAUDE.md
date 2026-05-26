@@ -164,6 +164,16 @@ Waveform and duration picker share a `ZStack` at fixed `height: 48`, toggled by 
 ### Button focus highlight (sheet close button)
 The `xmark.circle.fill` close button in TranscriptSheet uses `.focusable(false)` to prevent it from capturing keyboard focus and showing the blue focus ring on sheet open.
 
+## build.sh — lessons learned
+
+### DO NOT touch the dylib bundling logic unless absolutely necessary
+The rpath-fixing section in `build.sh` (for `whisper-cli`, `libwhisper`, `libggml`) was carefully crafted and validated. Replacing it with "smarter" auto-discovery broke two things simultaneously:
+
+1. **Never run `install_name_tool` on `.so` backend plugins** — ggml loads them via `dlopen` with their own internal linking. Rewriting their paths causes `GGML_ASSERT(device) failed` at model load time.
+2. **Never `strip` whisper-cli** — `strip -x` removes local symbols that whisper-cli needs at runtime, causing transcription to return empty text silently.
+
+Rule: if the bundling works, change only what's strictly necessary. The `.so` files go in as-is; only the `.dylib` files and the `whisper-cli` binary get rpath surgery.
+
 ## Known issues / watch out
 
 - `AVAudioEngine.inputNode.outputFormat` must only be queried after mic permission is granted — crash if called before.

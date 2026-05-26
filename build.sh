@@ -113,45 +113,16 @@ cat > "$ENTITLEMENTS" << 'ENT'
 </plist>
 ENT
 
-# ─── Helper: copy a dylib and rewrite its install name to @rpath ───────────
-copy_dylib() {
-    local src="$1"
-    local dst="$MACOS_DIR/$(basename "$src")"
-    [ -f "$src" ] || return 0
-    cp "$src" "$dst"
-    local id
-    id=$(otool -D "$dst" 2>/dev/null | tail -1)
-    local name
-    name=$(basename "$id")
-    install_name_tool -id "@rpath/$name" "$dst" 2>/dev/null || true
-}
-
-# ─── Helper: rewrite all non-system dylib references to @rpath ─────────────
-fix_refs() {
-    local bin="$1"
-    while IFS= read -r line; do
-        # lines like: /opt/homebrew/... (compatibility ...)
-        local path
-        path=$(echo "$line" | awk '{print $1}')
-        [[ "$path" == /* ]] || continue
-        [[ "$path" == /usr/lib/* || "$path" == /System/* ]] && continue
-        local name
-        name=$(basename "$path")
-        install_name_tool -change "$path" "@rpath/$name" "$bin" 2>/dev/null || true
-    done < <(otool -L "$bin" 2>/dev/null | tail -n +2)
-}
-
 # ─── Production bundle ──────────────────────────────────────────────────────
 if [ "$DEV_MODE" = false ]; then
 
-    # ffmpeg (self-contained static build — no extra dylibs needed)
+    # ffmpeg
     FFMPEG_SRC=""
     for p in /opt/homebrew/bin/ffmpeg /usr/local/bin/ffmpeg; do
         [ -f "$p" ] && { FFMPEG_SRC="$p"; break; }
     done
     if [ -n "$FFMPEG_SRC" ]; then
         cp "$FFMPEG_SRC" "$MACOS_DIR/ffmpeg"
-        strip -x "$MACOS_DIR/ffmpeg" 2>/dev/null || true
         echo "  Bundled: ffmpeg ($(du -sh "$MACOS_DIR/ffmpeg" | cut -f1))"
     else
         echo "  ⚠️  ffmpeg not found"
@@ -165,36 +136,52 @@ if [ "$DEV_MODE" = false ]; then
 
     if [ -n "$WHISPER_CLI_SRC" ]; then
         cp "$WHISPER_CLI_SRC" "$MACOS_DIR/whisper-cli"
-        strip -x "$MACOS_DIR/whisper-cli" 2>/dev/null || true
 
-        # Discover and copy all non-system dylib deps of whisper-cli
-        while IFS= read -r line; do
-            local_path=$(echo "$line" | awk '{print $1}')
-            [[ "$local_path" == /* ]] || continue
-            [[ "$local_path" == /usr/lib/* || "$local_path" == /System/* ]] && continue
-            copy_dylib "$local_path"
-        done < <(otool -L "$WHISPER_CLI_SRC" 2>/dev/null | tail -n +2)
-
-        # Also pull libwhisper (may not be a direct dep of whisper-cli on some versions)
-        WHISPER_VER=$(ls /opt/homebrew/Cellar/whisper-cpp/ 2>/dev/null | sort -V | tail -1)
+        # libwhisper
+        WHISPER_VER=$(ls /opt/homebrew/Cellar/whisper-cpp/ 2>/dev/null | head -1)
         WHISPER_LIB="/opt/homebrew/Cellar/whisper-cpp/$WHISPER_VER/lib/libwhisper.1.dylib"
-        copy_dylib "$WHISPER_LIB"
+        [ -f "$WHISPER_LIB" ] && cp "$WHISPER_LIB" "$MACOS_DIR/libwhisper.1.dylib"
 
-        # ggml backend plugins (.so) — keep all CPU variants for cross-machine compat
+        # ggml core dylibs
+        GGML_LIB_DIR="/opt/homebrew/opt/ggml/lib"
+        for lib in libggml.0.dylib libggml-base.0.dylib; do
+            [ -f "$GGML_LIB_DIR/$lib" ] && cp "$GGML_LIB_DIR/$lib" "$MACOS_DIR/$lib"
+        done
+
+        # ggml backend plugins (.so) — all CPU variants for cross-machine compat
         GGML_LIBEXEC="/opt/homebrew/opt/ggml/libexec"
-        if [ -d "$GGML_LIBEXEC" ]; then
-            for so in "$GGML_LIBEXEC"/libggml-*.so; do
-                [ -f "$so" ] && cp "$so" "$MACOS_DIR/"
-            done
+        [ -d "$GGML_LIBEXEC" ] && cp "$GGML_LIBEXEC"/libggml-*.so "$MACOS_DIR/" 2>/dev/null || true
+
+        # Fix rpath on whisper-cli
+        install_name_tool -add_rpath "@executable_path" "$MACOS_DIR/whisper-cli" 2>/dev/null || true
+        install_name_tool \
+            -change "/opt/homebrew/opt/ggml/lib/libggml.0.dylib"      "@rpath/libggml.0.dylib" \
+            -change "/opt/homebrew/opt/ggml/lib/libggml-base.0.dylib" "@rpath/libggml-base.0.dylib" \
+            "$MACOS_DIR/whisper-cli" 2>/dev/null || true
+
+        # Fix rpath on libwhisper
+        if [ -f "$MACOS_DIR/libwhisper.1.dylib" ]; then
+            install_name_tool -id "@rpath/libwhisper.1.dylib" "$MACOS_DIR/libwhisper.1.dylib" 2>/dev/null || true
+            install_name_tool -add_rpath "@loader_path" "$MACOS_DIR/libwhisper.1.dylib" 2>/dev/null || true
+            install_name_tool \
+                -change "/opt/homebrew/opt/ggml/lib/libggml.0.dylib"      "@loader_path/libggml.0.dylib" \
+                -change "/opt/homebrew/opt/ggml/lib/libggml-base.0.dylib" "@loader_path/libggml-base.0.dylib" \
+                "$MACOS_DIR/libwhisper.1.dylib" 2>/dev/null || true
         fi
 
-        # Add @executable_path rpath so bundled dylibs are found
-        install_name_tool -add_rpath "@executable_path" "$MACOS_DIR/whisper-cli" 2>/dev/null || true
+        # Fix rpath on libggml
+        if [ -f "$MACOS_DIR/libggml.0.dylib" ]; then
+            install_name_tool -id "@rpath/libggml.0.dylib" "$MACOS_DIR/libggml.0.dylib" 2>/dev/null || true
+            install_name_tool -add_rpath "@loader_path" "$MACOS_DIR/libggml.0.dylib" 2>/dev/null || true
+            install_name_tool \
+                -change "@rpath/libggml-base.0.dylib" "@loader_path/libggml-base.0.dylib" \
+                "$MACOS_DIR/libggml.0.dylib" 2>/dev/null || true
+        fi
 
-        # Rewrite all hardcoded Homebrew paths → @rpath in every bundled binary
-        for bin in "$MACOS_DIR/whisper-cli" "$MACOS_DIR"/*.dylib "$MACOS_DIR"/*.so; do
-            [ -f "$bin" ] && fix_refs "$bin"
-        done
+        # Fix id on libggml-base
+        if [ -f "$MACOS_DIR/libggml-base.0.dylib" ]; then
+            install_name_tool -id "@rpath/libggml-base.0.dylib" "$MACOS_DIR/libggml-base.0.dylib" 2>/dev/null || true
+        fi
 
         echo "  Bundled: whisper-cli + dylibs + backends"
     else
@@ -206,14 +193,7 @@ if [ "$DEV_MODE" = false ]; then
 
 fi
 
-# Sign each binary individually, then the whole bundle
-find "$MACOS_DIR" -type f \( -name "*.dylib" -o -name "*.so" \) | while read -r lib; do
-    codesign --force --sign - "$lib" 2>/dev/null || true
-done
-codesign --force --sign - --entitlements "$ENTITLEMENTS" "$MACOS_DIR/$APP_NAME" 2>/dev/null || true
-[ -f "$MACOS_DIR/whisper-cli" ] && codesign --force --sign - "$MACOS_DIR/whisper-cli" 2>/dev/null || true
-[ -f "$MACOS_DIR/ffmpeg" ]      && codesign --force --sign - "$MACOS_DIR/ffmpeg"      2>/dev/null || true
-codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_BUNDLE"
+codesign --force --deep --sign - --entitlements "$ENTITLEMENTS" "$APP_BUNDLE"
 
 echo ""
 echo "✅ Build complete: $APP_BUNDLE"

@@ -10,8 +10,11 @@ class AudioPlayer: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var duration: TimeInterval = 0
     @Published var scrollTargetID: UUID? = nil
     @Published var currentNumber: Int = 0
-    @Published var volume: Float = 0.3 {
-        didSet { player?.volume = volume }
+    @Published var volume: Float = UserDefaults.standard.object(forKey: "playerVolume") as? Float ?? 0.3 {
+        didSet {
+            player?.volume = volume
+            UserDefaults.standard.set(volume, forKey: "playerVolume")
+        }
     }
 
     private var player: AVAudioPlayer?
