@@ -59,3 +59,17 @@ Models are stored in `~/Library/Application Support/SushiSpeak/models/`.
 ## Recordings Location
 
 `~/Documents/SushiSpeak/rec_<timestamp>.<format>`
+
+---
+
+## 版权声明
+
+Copyright © 2026 EddieChan1993. All rights reserved.
+
+本软件及其源代码受版权法保护。
+
+- **禁止未经授权的商业使用**：未获得作者书面授权，不得将本软件或其任何衍生版本用于任何商业目的，包括但不限于销售、出租、捆绑销售或以盈利为目的的分发。
+- **个人学习使用**：仅允许在获得授权的设备上用于个人非商业用途。
+- **禁止二次分发**：未经授权不得以任何形式转发、再分发本软件的安装包或源代码。
+
+如需商业授权或合作，请联系：**wx DC_Wen** 或邮箱 **dc_wen666666@163.com**
