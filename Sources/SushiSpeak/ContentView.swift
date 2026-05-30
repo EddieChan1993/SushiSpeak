@@ -1,3 +1,6 @@
+// Copyright © 2026 EddieChan1993. All rights reserved.
+// Unauthorized commercial use is strictly prohibited.
+
 import SwiftUI
 import AVFoundation
 
@@ -95,7 +98,7 @@ struct ContentView: View {
     @AppStorage("lastMinutes") private var selectedMinutes = 5
     @AppStorage("lastSeconds") private var selectedSeconds = 0
     @AppStorage("audioFormat") private var audioFormatRaw = AudioFormat.mp3.rawValue
-    @AppStorage("whisperModel") private var whisperModelRaw = WhisperModel.small.rawValue
+    @AppStorage("whisperModelPath") private var whisperModelPath: String = ""
     @State private var timeRemaining = 0
     @State private var isRunning = false
     @State private var timerTask: Task<Void, Never>?
@@ -107,7 +110,6 @@ struct ContentView: View {
     @State private var importErrorMsg: String? = nil
     @State private var showImportError = false
     @State private var isValidatingImport = false
-    @State private var showModelInfo = false
     @State private var deleteModelHovered = false
     @State private var showDeleteModelConfirm = false
 
@@ -115,8 +117,14 @@ struct ContentView: View {
         AudioFormat(rawValue: audioFormatRaw) ?? .mp3
     }
 
-    var selectedWhisperModel: WhisperModel {
-        WhisperModel(rawValue: whisperModelRaw) ?? .small
+    /// 当前加载的模型文件 URL（nil = 未选择）
+    var whisperModelURL: URL? {
+        whisperModelPath.isEmpty ? nil : URL(fileURLWithPath: whisperModelPath)
+    }
+
+    /// 当前模型的显示文件名
+    var whisperModelFileName: String? {
+        whisperModelURL?.lastPathComponent
     }
 
     var totalSeconds: Int { selectedMinutes * 60 + selectedSeconds }
@@ -171,7 +179,10 @@ struct ContentView: View {
 
     var modelPickerControls: some View {
         HStack(spacing: 6) {
-            Button { showModelInfo = true } label: {
+            // 🌐 下载引导
+            Button {
+                NSWorkspace.shared.open(URL(string: "https://huggingface.co/ggerganov/whisper.cpp/tree/main")!)
+            } label: {
                 Image(systemName: "globe")
                     .foregroundStyle(linkHovered ? Color.accentColor : Color.secondary)
                     .scaleEffect(linkHovered ? 1.15 : 1.0)
@@ -179,29 +190,38 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .focusable(false)
-            .help("查看下载地址")
+            .help("查看模型下载地址")
             .onHover { linkHovered = $0 }
-            .popover(isPresented: $showModelInfo, arrowEdge: .bottom) {
-                ModelInfoPopover(model: selectedWhisperModel, isPresented: $showModelInfo)
-            }
 
-            Picker("", selection: $whisperModelRaw) {
-                ForEach(WhisperModel.allCases) { m in
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(whisper.isModelAvailable(m) ? Color.green : Color.clear)
-                            .frame(width: 6, height: 6)
-                        Text(m.shortName)
-                    }.tag(m.rawValue)
+            // 已加载模型 chip
+            if let fileName = whisperModelFileName {
+                HStack(spacing: 5) {
+                    Text(fileName)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 160)
+                    Button {
+                        whisperModelPath = ""
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    .help("移除当前模型")
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
             }
-            .labelsHidden()
-            .frame(width: 100)
-            .focusable(false)
 
+            // 选择模型按钮
             if isValidatingImport {
                 ProgressView().controlSize(.small).help("正在验证模型…")
-            } else if !whisper.isModelAvailable(selectedWhisperModel) {
+            } else {
                 Button { importModelFile() } label: {
                     Image(systemName: "folder.badge.plus")
                         .foregroundStyle(importHovered ? Color.accentColor : Color.secondary)
@@ -210,30 +230,8 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
                 .focusable(false)
-                .help("导入 ggml-\(selectedWhisperModel.rawValue).bin")
+                .help(whisperModelFileName == nil ? "选择 Whisper 模型文件（任意 .bin）" : "更换模型")
                 .onHover { importHovered = $0 }
-            } else {
-                Button { showDeleteModelConfirm = true } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(deleteModelHovered ? Color.red : Color.secondary)
-                        .scaleEffect(deleteModelHovered ? 1.15 : 1.0)
-                        .animation(.spring(response: 0.15), value: deleteModelHovered)
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .help("删除 \(selectedWhisperModel.shortName) 模型文件")
-                .onHover { deleteModelHovered = $0 }
-                .confirmationDialog(
-                    "删除 \(selectedWhisperModel.shortName) 模型？",
-                    isPresented: $showDeleteModelConfirm,
-                    titleVisibility: .visible
-                ) {
-                    Button("删除", role: .destructive) {
-                        try? whisper.deleteModel(selectedWhisperModel)
-                    }
-                } message: {
-                    Text("模型文件将从本地删除，下次使用需重新导入。")
-                }
             }
         }
         .alert("导入失败", isPresented: $showImportError) {
@@ -404,7 +402,7 @@ struct ContentView: View {
                                             audioPlayer: audioPlayer,
                                             number: recordingNumbers[rec.id] ?? 0,
                                             whisper: whisper,
-                                            whisperModel: selectedWhisperModel,
+                                            whisperModelURL: whisperModelURL,
                                             onDelete: { recorder.delete(rec) }
                                         )
                                         .id(rec.id)
@@ -486,69 +484,35 @@ struct ContentView: View {
     func importModelFile() {
         let panel = NSOpenPanel()
         panel.title = "选择 Whisper 模型文件"
-        panel.message = "可同时选择多个 ggml-*.bin 文件，将自动识别并分别导入"
-        panel.allowsMultipleSelection = true
+        panel.message = "选择任意 ggml-*.bin 模型文件，加载后直接使用"
+        panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.allowedContentTypes = []
-        guard panel.runModal() == .OK else { return }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        let expectedNames = WhisperModel.allCases.map { $0.fileName }.joined(separator: "\n  ")
-
-        // Phase 1: detect model for every file + check for duplicates (sync, instant)
-        var plan: [(url: URL, model: WhisperModel)] = []
-        var errors: [String] = []
-
-        for url in panel.urls {
-            let stem = url.deletingPathExtension().lastPathComponent
-            let detected = WhisperModel.allCases.first(where: { url.lastPathComponent == $0.fileName })
-                        ?? WhisperModel.allCases.first(where: {
-                               let base = String($0.fileName.dropLast(4))
-                               return stem.hasPrefix(base + " ") || stem.hasPrefix(base + "(")
-                           })
-            guard let model = detected else {
-                errors.append("「\(url.lastPathComponent)」文件名不符合要求。\n支持的文件名：\n  \(expectedNames)")
-                continue
-            }
-            if plan.contains(where: { $0.model == detected }) {
-                errors.append("「\(url.lastPathComponent)」与已选文件重复（\(model.shortName)）。")
-                continue
-            }
-            plan.append((url, model))
-        }
-
-        if !errors.isEmpty {
-            importErrorMsg = errors.joined(separator: "\n\n")
+        guard url.pathExtension.lowercased() == "bin" else {
+            importErrorMsg = "请选择 .bin 格式的 Whisper 模型文件。"
             showImportError = true
             return
         }
 
-        // Phase 2: run whisper-cli against each file to verify it loads (async)
-        // Phase 3: copy all only if every file passes
+        // 验证模型可以正常加载，然后复制到 App Support
         isValidatingImport = true
         Task {
-            var validateErrors: [String] = []
-            for item in plan {
-                do {
-                    try await whisper.validateModelWorks(item.model, at: item.url)
-                } catch {
-                    validateErrors.append("「\(item.url.lastPathComponent)」：\(error.localizedDescription)")
+            do {
+                try await whisper.validateModelWorksAtURL(url)
+                let dest = try whisper.importAnyModel(from: url)
+                await MainActor.run {
+                    isValidatingImport = false
+                    whisperModelPath = dest.path
+                }
+            } catch {
+                await MainActor.run {
+                    isValidatingImport = false
+                    importErrorMsg = "「\(url.lastPathComponent)」：\(error.localizedDescription)"
+                    showImportError = true
                 }
             }
-
-            isValidatingImport = false
-
-            if !validateErrors.isEmpty {
-                importErrorMsg = validateErrors.joined(separator: "\n\n")
-                showImportError = true
-                return
-            }
-
-            var lastImported: WhisperModel? = nil
-            for item in plan {
-                try? whisper.importModel(item.model, from: item.url)
-                lastImported = item.model
-            }
-            if let last = lastImported { whisperModelRaw = last.rawValue }
         }
     }
 }
@@ -614,7 +578,7 @@ struct RecordingRow: View {
     @ObservedObject var audioPlayer: AudioPlayer
     let number: Int
     let whisper: WhisperTranscriber
-    let whisperModel: WhisperModel
+    let whisperModelURL: URL?
     let onDelete: () -> Void
 
     var isPlaying: Bool { audioPlayer.currentRecording?.id == recording.id && audioPlayer.isPlaying }
@@ -705,7 +669,7 @@ struct RecordingRow: View {
             }
             .buttonStyle(.plain)
             .focusable(false)
-            .help(whisper.isModelAvailable(whisperModel) ? "识别语音" : "请先导入模型")
+            .help(whisperModelURL != nil ? "识别语音" : "请先在顶栏选择模型")
             .onHover { transcribeHovered = $0 }
             .disabled(transcribeState == .loading)
             .alert("识别失败", isPresented: $showTranscribeError) {
@@ -713,10 +677,10 @@ struct RecordingRow: View {
             } message: {
                 Text(transcribeError ?? "未知错误")
             }
-            .alert("模型未导入", isPresented: $showDownloadConfirm) {
+            .alert("模型未选择", isPresented: $showDownloadConfirm) {
                 Button("好") {}
             } message: {
-                Text("请先在 Recordings 栏头部点击 📁 导入 \(whisperModel.shortName) 模型。")
+                Text("请先在顶栏点击 📁 选择一个 Whisper 模型文件（.bin）。")
             }
             .sheet(isPresented: $showTranscriptSheet) {
                 TranscriptSheet(text: transcriptText, isPresented: $showTranscriptSheet)
@@ -754,7 +718,7 @@ struct RecordingRow: View {
     }
 
     func transcribeTapped() {
-        if whisper.isModelAvailable(whisperModel) {
+        if whisperModelURL != nil {
             doTranscribe()
         } else {
             showDownloadConfirm = true
@@ -762,10 +726,11 @@ struct RecordingRow: View {
     }
 
     func doTranscribe() {
+        guard let modelURL = whisperModelURL else { return }
         transcribeState = .loading
         Task {
             do {
-                let text = try await whisper.transcribe(url: recording.url, model: whisperModel)
+                let text = try await whisper.transcribeWithModelURL(modelURL, audioURL: recording.url)
                 await MainActor.run {
                     transcriptText = text
                     transcribeState = .idle
@@ -898,77 +863,6 @@ struct PlayerBar: View {
     }
 }
 
-// MARK: - Model Info Popover
-
-struct ModelInfoPopover: View {
-    let model: WhisperModel
-    @Binding var isPresented: Bool
-    @State private var copied = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "cube.box")
-                    .foregroundStyle(.secondary)
-                Text("Whisper \(model.shortName) 模型")
-                    .font(.headline)
-                Spacer()
-                Button { isPresented = false } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-
-            Divider()
-
-            Group {
-                LabeledRow(label: "文件名", value: model.fileName)
-                LabeledRow(label: "大小", value: model.displayName.components(separatedBy: "(").last.map { "(" + $0 } ?? "")
-                LabeledRow(label: "格式", value: "GGML 二进制格式（whisper.cpp 专用）")
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("下载地址")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(model.downloadURL.absoluteString)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack {
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(model.downloadURL.absoluteString, forType: .string)
-                    copied = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
-                } label: {
-                    Label(copied ? "已复制" : "复制链接", systemImage: copied ? "checkmark" : "doc.on.doc")
-                }
-                .buttonStyle(.bordered)
-                .tint(copied ? .green : .accentColor)
-                .controlSize(.small)
-
-                Spacer()
-
-                Button("在浏览器打开") {
-                    NSWorkspace.shared.open(model.downloadURL)
-                    isPresented = false
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
-        }
-        .padding(16)
-        .frame(width: 340)
-    }
-}
 
 struct LabeledRow: View {
     let label: String

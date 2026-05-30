@@ -180,5 +180,15 @@ Rule: if the bundling works, change only what's strictly necessary. The `.so` fi
 - `booster.removeTap(onBus: 0)` must be called before `engine.stop()` — occasional EXC_BAD_ACCESS on rapid start/stop otherwise.
 - `DYLD_LIBRARY_PATH` is set on the child Process environment; this works for non-system binaries but may be stripped by SIP in edge cases.
 - Whisper `--prompt` context is not yet wired to previous transcripts in the UI.
-- Model validation (`validateModelWorks`) runs whisper-cli sequentially per file; validating a Large V3 model can take 30–60 s — the spinner will show for that duration.
+- Model validation (`validateModelWorksAtURL`) runs whisper-cli against a silent WAV; validating a Large V3 model can take 30–60 s — the spinner will show for that duration.
 - `transcribe()` calls `proc.waitUntilExit()` directly; for large models this briefly ties up a Swift concurrency thread (not the main thread). Acceptable for now.
+
+## 变更记录
+
+### 2026-05-30
+- 🆕 新增：Whisper 模型改为任意 `.bin` 文件直接加载，不再绑定枚举名（`WhisperTranscriber.transcribeWithModelURL`）
+- 🆕 新增：`importAnyModel(from:)`、`validateModelWorksAtURL(_:)`、`deleteModelAtPath(_:)` URL-based 方法
+- 🆕 新增：🌐 按钮直接跳转 HuggingFace 模型页（https://huggingface.co/ggerganov/whisper.cpp/tree/main）
+- ♻️ 优化：头部模型 UI 改为文件名 chip + × 移除按钮，去掉 Picker 和 CPU 图标
+- 🗑️ 删除：`ModelInfoPopover`、`ModelDownloadPopover` 复杂弹窗
+- ♻️ 优化：模型路径用 `@AppStorage("whisperModelPath")` 存储绝对路径

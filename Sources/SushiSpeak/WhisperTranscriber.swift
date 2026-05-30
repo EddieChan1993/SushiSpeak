@@ -1,3 +1,6 @@
+// Copyright © 2026 EddieChan1993. All rights reserved.
+// Unauthorized commercial use is strictly prohibited.
+
 import Foundation
 
 enum WhisperModel: String, CaseIterable, Identifiable {
@@ -232,6 +235,62 @@ class WhisperTranscriber: ObservableObject {
         try FileManager.default.removeItem(at: dest)
     }
 
+    // Import any .bin file — copies with original filename, returns destination URL
+    func importAnyModel(from sourceURL: URL) throws -> URL {
+        let dest = modelsDir.appendingPathComponent(sourceURL.lastPathComponent)
+        if FileManager.default.fileExists(atPath: dest.path) {
+            try FileManager.default.removeItem(at: dest)
+        }
+        try FileManager.default.copyItem(at: sourceURL, to: dest)
+        return dest
+    }
+
+    func deleteModelAtPath(_ path: URL) throws {
+        guard FileManager.default.fileExists(atPath: path.path) else { return }
+        try FileManager.default.removeItem(at: path)
+    }
+
+    // Validate any model file (URL-based, no enum required)
+    func validateModelWorksAtURL(_ url: URL) async throws {
+        guard let whisperBin = whisperPath else { throw WhisperError.binaryNotFound }
+        let execDir = self.execDir
+        let silentWAV = makeSilentWAV()
+
+        try await Task.detached(priority: .userInitiated) {
+            let tmpWAV = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent(UUID().uuidString + "_validate.wav")
+            try silentWAV.write(to: tmpWAV)
+            defer { try? FileManager.default.removeItem(at: tmpWAV) }
+
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: whisperBin)
+            proc.arguments = ["-m", url.path, "-f", tmpWAV.path, "--no-timestamps", "-t", "1"]
+            proc.standardOutput = FileHandle.nullDevice
+            let errPipe = Pipe()
+            proc.standardError = errPipe
+
+            var env = ProcessInfo.processInfo.environment
+            if let dir = execDir {
+                env["GGML_BACKEND_PATH"] = dir
+                env["DYLD_LIBRARY_PATH"] = "\(dir):\(env["DYLD_LIBRARY_PATH"] ?? "")"
+            }
+            proc.environment = env
+
+            try proc.run()
+            proc.waitUntilExit()
+
+            if proc.terminationStatus != 0 {
+                let errOut = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                let reason = errOut.components(separatedBy: .newlines)
+                    .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                    .last(where: { $0.lowercased().contains("error") || $0.lowercased().contains("fail") })
+                    ?? errOut.components(separatedBy: .newlines).first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                    ?? "模型加载失败"
+                throw ImportError.modelLoadFailed(reason: String(reason.prefix(200)))
+            }
+        }.value
+    }
+
     // MARK: - Transcribe
 
     func transcribe(url: URL, model: WhisperModel, prompt: String? = nil) async throws -> String {
@@ -302,11 +361,76 @@ class WhisperTranscriber: ObservableObject {
         return result
     }
 
+    // URL-based transcribe — no enum, any .bin file
+    func transcribeWithModelURL(_ modelURL: URL, audioURL: URL, prompt: String? = nil) async throws -> String {
+        guard let whisperBin = whisperPath else { throw WhisperError.binaryNotFound }
+        guard FileManager.default.fileExists(atPath: modelURL.path) else {
+            throw WhisperError.modelFileMissing(modelURL.lastPathComponent)
+        }
+
+        let wavURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString + ".wav")
+        defer { try? FileManager.default.removeItem(at: wavURL) }
+
+        if let ffmpeg = ffmpegPath {
+            let conv = Process()
+            conv.executableURL = URL(fileURLWithPath: ffmpeg)
+            conv.arguments = ["-y", "-i", audioURL.path,
+                              "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+                              wavURL.path]
+            conv.standardOutput = FileHandle.nullDevice
+            conv.standardError  = FileHandle.nullDevice
+            try conv.run(); conv.waitUntilExit()
+        }
+
+        let inputPath = FileManager.default.fileExists(atPath: wavURL.path) ? wavURL.path : audioURL.path
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: whisperBin)
+
+        var args = [
+            "-m", modelURL.path,
+            "-f", inputPath,
+            "-l", "auto",
+            "--no-timestamps",
+            "-t", "\(max(1, ProcessInfo.processInfo.processorCount / 2))"
+        ]
+        if let prompt, !prompt.isEmpty {
+            args += ["--prompt", prompt]
+        }
+        proc.arguments = args
+
+        var env = ProcessInfo.processInfo.environment
+        if let dir = execDir {
+            env["GGML_BACKEND_PATH"] = dir
+            env["DYLD_LIBRARY_PATH"] = "\(dir):\(env["DYLD_LIBRARY_PATH"] ?? "")"
+        }
+        proc.environment = env
+
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        proc.standardOutput = outPipe
+        proc.standardError  = errPipe
+
+        try proc.run()
+        proc.waitUntilExit()
+
+        let raw = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let lines = raw.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.hasPrefix("[") && !$0.isEmpty }
+        let result = lines.joined(separator: " ")
+
+        if result.isEmpty { throw WhisperError.emptyResult }
+        return result
+    }
+
     // MARK: - Error
 
     enum WhisperError: LocalizedError {
         case binaryNotFound
         case modelNotDownloaded(WhisperModel)
+        case modelFileMissing(String)
         case downloadFailed
         case emptyResult
 
@@ -316,6 +440,8 @@ class WhisperTranscriber: ObservableObject {
                 return "whisper-cli not found. Install: brew install whisper-cpp"
             case .modelNotDownloaded(let m):
                 return "Model \"\(m.shortName)\" not downloaded yet."
+            case .modelFileMissing(let name):
+                return "模型文件不存在：\(name)"
             case .downloadFailed:
                 return "Failed to create download stream."
             case .emptyResult:

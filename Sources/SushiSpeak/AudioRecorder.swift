@@ -1,3 +1,6 @@
+// Copyright © 2026 EddieChan1993. All rights reserved.
+// Unauthorized commercial use is strictly prohibited.
+
 import Foundation
 import AVFoundation
 import CoreMedia
@@ -39,15 +42,36 @@ class AudioRecorder: NSObject, ObservableObject {
     }
 
     private var storageDir: URL {
-        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dir = base.appendingPathComponent("SushiSpeak", isDirectory: true)
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = base.appendingPathComponent("SushiSpeak/recordings", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
     override init() {
         super.init()
+        migrateFromDocumentsIfNeeded()
         Task { await loadRecordings() }
+    }
+
+    /// 把旧版存在 ~/Documents/SushiSpeak/ 的录音迁移到 Application Support
+    private func migrateFromDocumentsIfNeeded() {
+        let oldBase = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let oldDir = oldBase.appendingPathComponent("SushiSpeak")
+        guard FileManager.default.fileExists(atPath: oldDir.path) else { return }
+        let exts = Set(["m4a", "mp3", "aac", "wav"])
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: oldDir, includingPropertiesForKeys: nil, options: .skipsHiddenFiles
+        ) else { return }
+        let audioFiles = files.filter { exts.contains($0.pathExtension.lowercased()) }
+        guard !audioFiles.isEmpty else { return }
+        let dest = storageDir
+        for src in audioFiles {
+            let target = dest.appendingPathComponent(src.lastPathComponent)
+            if !FileManager.default.fileExists(atPath: target.path) {
+                try? FileManager.default.moveItem(at: src, to: target)
+            }
+        }
     }
 
     func startRecording(onStarted: @escaping () -> Void = {}) {

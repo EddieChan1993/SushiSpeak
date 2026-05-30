@@ -45,16 +45,20 @@ cp -r .build/SushiSpeak.app ~/Applications/
 
 ## Whisper Models
 
-On first use, select a model and click the download button (↓) in the Recordings header.  
-Models are stored in `~/Library/Application Support/SushiSpeak/models/`.
+Click 🌐 in the header to open the model download page, download any `ggml-*.bin` file, then click 📁 to select it. The loaded model is shown as a chip — click × to remove.
 
-| Model | Size | Speed |
-|-------|------|-------|
-| Tiny | ~75 MB | fastest |
-| Base | ~142 MB | fast |
-| **Small** | **~466 MB** | **default** |
-| Medium | ~1.5 GB | accurate |
-| Large V3 | ~3.1 GB | most accurate |
+Download page: https://huggingface.co/ggerganov/whisper.cpp/tree/main
+
+| Model | File | Size |
+|-------|------|------|
+| Tiny | `ggml-tiny.bin` | ~75 MB |
+| Base | `ggml-base.bin` | ~142 MB |
+| Small | `ggml-small.bin` | ~466 MB |
+| Medium | `ggml-medium.bin` | ~1.5 GB |
+| Large V3 | `ggml-large-v3.bin` | ~3.1 GB |
+| Large V3 Turbo | `ggml-large-v3-turbo.bin` | ~1.6 GB |
+
+Models are stored in `~/Library/Application Support/SushiSpeak/models/`.
 
 ## Recordings Location
 
