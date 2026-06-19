@@ -185,6 +185,11 @@ Rule: if the bundling works, change only what's strictly necessary. The `.so` fi
 
 ## 变更记录
 
+### 2026-06-19 (2)
+- 🆕 新增：全部删除改为垃圾桶图标 + "全部删除"文字，hover 变红 + 放大动画
+- ♻️ 优化：所有 `.plain` 按钮统一补全 hover 交互效果（xmark、眼睛、PlayerBar 播放、音量）
+- 🐛 修复：build.sh 移除自动 `brew install`，改为缺少依赖时报错退出并提示安装命令
+
 ### 2026-06-19
 - 🐛 修复：麦克风权限被拒（`.denied` 状态）时 `doStart()` 永远不会被调用，录音无声且无任何提示
 - 🆕 新增：`micPermissionDenied: Bool` 发布属性，权限被拒时触发弹窗

@@ -112,6 +112,9 @@ struct ContentView: View {
     @State private var isValidatingImport = false
     @State private var deleteModelHovered = false
     @State private var showDeleteModelConfirm = false
+    @State private var trashHovered = false
+    @State private var xmarkHovered = false
+    @State private var eyeHovered = false
 
     var selectedFormat: AudioFormat {
         AudioFormat(rawValue: audioFormatRaw) ?? .mp3
@@ -207,16 +210,20 @@ struct ContentView: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .fixedSize()
                         .frame(maxWidth: 160)
                     Button {
                         whisperModelPath = ""
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(xmarkHovered ? Color.red : Color.secondary)
+                            .scaleEffect(xmarkHovered ? 1.15 : 1.0)
+                            .animation(.spring(response: 0.15), value: xmarkHovered)
                     }
                     .buttonStyle(.plain)
                     .focusable(false)
+                    .onHover { xmarkHovered = $0 }
                     .help("移除当前模型")
                 }
                 .padding(.horizontal, 8)
@@ -259,11 +266,14 @@ struct ContentView: View {
 
                 Button { hideTimer.toggle() } label: {
                     Image(systemName: hideTimer ? "eye.slash" : "eye")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(eyeHovered ? Color.primary : Color.tertiary)
+                        .scaleEffect(eyeHovered ? 1.15 : 1.0)
+                        .animation(.spring(response: 0.15), value: eyeHovered)
                         .font(.system(size: 13))
                 }
                 .buttonStyle(.plain)
                 .focusable(false)
+                .onHover { eyeHovered = $0 }
                 .help(hideTimer ? "显示倒计时" : "隐藏倒计时")
                 .padding(.trailing, 24)
             }
@@ -368,17 +378,27 @@ struct ContentView: View {
                 Spacer()
 
                 if !recorder.recordings.isEmpty {
-                    Button("Delete All") { showDeleteConfirm = true }
-                        .foregroundStyle(.red)
-                        .buttonStyle(.plain)
-                        .focusable(false)
-                        .confirmationDialog(
-                            "Delete all \(recorder.recordings.count) recordings?",
-                            isPresented: $showDeleteConfirm,
-                            titleVisibility: .visible
-                        ) {
-                            Button("Delete All", role: .destructive) { recorder.deleteAll() }
+                    Button { showDeleteConfirm = true } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "trash")
+                            Text("全部删除")
                         }
+                        .font(.system(size: 11))
+                            .foregroundStyle(trashHovered ? Color.red : Color.secondary)
+                            .scaleEffect(trashHovered ? 1.15 : 1.0)
+                            .animation(.spring(response: 0.15), value: trashHovered)
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    .onHover { trashHovered = $0 }
+                    .help("清空所有录音")
+                    .confirmationDialog(
+                        "删除全部 \(recorder.recordings.count) 条录音？",
+                        isPresented: $showDeleteConfirm,
+                        titleVisibility: .visible
+                    ) {
+                        Button("全部删除", role: .destructive) { recorder.deleteAll() }
+                    }
                 }
             }
             .padding(.horizontal, 20)
@@ -763,6 +783,8 @@ struct RecordingRow: View {
 struct PlayerBar: View {
     @ObservedObject var audioPlayer: AudioPlayer
     @State private var showVolume = false
+    @State private var playHovered = false
+    @State private var volumeHovered = false
 
     private var progress: Double {
         audioPlayer.duration > 0 ? audioPlayer.currentTime / audioPlayer.duration : 0
@@ -796,9 +818,12 @@ struct PlayerBar: View {
                             .foregroundStyle(audioPlayer.currentRecording == nil
                                 ? Color.secondary.opacity(0.4)
                                 : (audioPlayer.isPlaying ? Color.orange : Color.accentColor))
+                            .scaleEffect(playHovered && audioPlayer.currentRecording != nil ? 1.12 : 1.0)
+                            .animation(.spring(response: 0.15), value: playHovered)
                     }
                     .buttonStyle(.plain)
                     .focusable(false)
+                    .onHover { playHovered = $0 }
                     .disabled(audioPlayer.currentRecording == nil)
 
                     // Slider
@@ -819,10 +844,13 @@ struct PlayerBar: View {
                             Text("\(Int(audioPlayer.volume * 100))%")
                                 .font(.system(size: 11, design: .monospaced))
                         }
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(volumeHovered ? Color.primary : Color.secondary)
+                        .scaleEffect(volumeHovered ? 1.08 : 1.0)
+                        .animation(.spring(response: 0.15), value: volumeHovered)
                     }
                     .buttonStyle(.plain)
                     .focusable(false)
+                    .onHover { volumeHovered = $0 }
                     .popover(isPresented: $showVolume, arrowEdge: .top) {
                         VStack(spacing: 8) {
                             Text("音量")

@@ -116,6 +116,15 @@ ENT
 # ─── Production bundle ──────────────────────────────────────────────────────
 if [ "$DEV_MODE" = false ]; then
 
+    # 检查依赖
+    MISSING=""
+    command -v ffmpeg &>/dev/null      || MISSING="$MISSING\n  brew install ffmpeg"
+    command -v whisper-cli &>/dev/null || MISSING="$MISSING\n  brew install whisper-cpp"
+    if [ -n "$MISSING" ]; then
+        echo "❌ 缺少依赖，请先安装：$MISSING"
+        exit 1
+    fi
+
     # ffmpeg
     FFMPEG_SRC=""
     for p in /opt/homebrew/bin/ffmpeg /usr/local/bin/ffmpeg; do
