@@ -157,6 +157,12 @@ struct ContentView: View {
             timerTask?.cancel()
             if isRunning { recorder.stopRecording() }
         }
+        .alert("麦克风权限被拒", isPresented: $recorder.micPermissionDenied) {
+            Button("打开系统设置") { recorder.openMicPrivacySettings() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("SushiSpeak 需要麦克风权限才能录音。\n请前往「系统设置 › 隐私与安全性 › 麦克风」开启。")
+        }
     }
 
     // MARK: Header

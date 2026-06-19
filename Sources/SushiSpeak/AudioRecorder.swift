@@ -4,6 +4,7 @@
 import Foundation
 import AVFoundation
 import CoreMedia
+import AppKit
 
 enum AudioFormat: String, CaseIterable {
     case mp3 = "MP3"
@@ -75,18 +76,33 @@ class AudioRecorder: NSObject, ObservableObject {
     }
 
     func startRecording(onStarted: @escaping () -> Void = {}) {
-        // If already authorized, start synchronously to avoid async delay skewing the timer
-        if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        switch status {
+        case .authorized:
             doStart()
             onStarted()
-        } else {
+        case .notDetermined:
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
-                guard granted, let self else { return }
+                guard let self else { return }
                 DispatchQueue.main.async {
-                    self.doStart()
-                    onStarted()
+                    if granted {
+                        self.doStart()
+                        onStarted()
+                    } else {
+                        self.micPermissionDenied = true
+                    }
                 }
             }
+        default:
+            micPermissionDenied = true
+        }
+    }
+
+    @Published var micPermissionDenied = false
+
+    func openMicPrivacySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+            NSWorkspace.shared.open(url)
         }
     }
 

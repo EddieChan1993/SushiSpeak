@@ -185,6 +185,12 @@ Rule: if the bundling works, change only what's strictly necessary. The `.so` fi
 
 ## 变更记录
 
+### 2026-06-19
+- 🐛 修复：麦克风权限被拒（`.denied` 状态）时 `doStart()` 永远不会被调用，录音无声且无任何提示
+- 🆕 新增：`micPermissionDenied: Bool` 发布属性，权限被拒时触发弹窗
+- 🆕 新增：`openMicPrivacySettings()` 直接跳转系统设置麦克风隐私页
+- 🆕 新增：ContentView 中 `.alert("麦克风权限被拒")` 弹窗，引导用户开启权限
+
 ### 2026-05-30
 - 🆕 新增：Whisper 模型改为任意 `.bin` 文件直接加载，不再绑定枚举名（`WhisperTranscriber.transcribeWithModelURL`）
 - 🆕 新增：`importAnyModel(from:)`、`validateModelWorksAtURL(_:)`、`deleteModelAtPath(_:)` URL-based 方法
