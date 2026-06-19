@@ -69,6 +69,15 @@ class WhisperTranscriber: ObservableObject {
         Bundle.main.executableURL?.deletingLastPathComponent().path
     }
 
+    // 只有 bundle 里真正存在 dylib 时才注入路径，避免干扰系统 whisper-cli
+    private func applyBundleEnv(_ env: inout [String: String]) {
+        guard let dir = execDir,
+              FileManager.default.fileExists(atPath: (dir as NSString).appendingPathComponent("libwhisper.1.dylib"))
+        else { return }
+        env["GGML_BACKEND_PATH"] = dir
+        env["DYLD_LIBRARY_PATH"] = "\(dir):\(env["DYLD_LIBRARY_PATH"] ?? "")"
+    }
+
     private var whisperPath: String? {
         if let dir = execDir {
             let p = (dir as NSString).appendingPathComponent("whisper-cli")
@@ -159,11 +168,10 @@ class WhisperTranscriber: ObservableObject {
     // Validates actual usability — exits non-zero if the model fails to load.
     func validateModelWorks(_ model: WhisperModel, at url: URL) async throws {
         guard let whisperBin = whisperPath else { throw WhisperError.binaryNotFound }
-        let execDir = self.execDir
         let silentWAV = makeSilentWAV()
         let modelPath = url.path
 
-        try await Task.detached(priority: .userInitiated) {
+        try await Task.detached(priority: .userInitiated) { [self] in
             let tmpWAV = URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent(UUID().uuidString + "_validate.wav")
             try silentWAV.write(to: tmpWAV)
@@ -177,10 +185,7 @@ class WhisperTranscriber: ObservableObject {
             proc.standardError = errPipe
 
             var env = ProcessInfo.processInfo.environment
-            if let dir = execDir {
-                env["GGML_BACKEND_PATH"] = dir
-                env["DYLD_LIBRARY_PATH"] = "\(dir):\(env["DYLD_LIBRARY_PATH"] ?? "")"
-            }
+            applyBundleEnv(&env)
             proc.environment = env
 
             try proc.run()
@@ -253,10 +258,9 @@ class WhisperTranscriber: ObservableObject {
     // Validate any model file (URL-based, no enum required)
     func validateModelWorksAtURL(_ url: URL) async throws {
         guard let whisperBin = whisperPath else { throw WhisperError.binaryNotFound }
-        let execDir = self.execDir
         let silentWAV = makeSilentWAV()
 
-        try await Task.detached(priority: .userInitiated) {
+        try await Task.detached(priority: .userInitiated) { [self] in
             let tmpWAV = URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent(UUID().uuidString + "_validate.wav")
             try silentWAV.write(to: tmpWAV)
@@ -270,10 +274,7 @@ class WhisperTranscriber: ObservableObject {
             proc.standardError = errPipe
 
             var env = ProcessInfo.processInfo.environment
-            if let dir = execDir {
-                env["GGML_BACKEND_PATH"] = dir
-                env["DYLD_LIBRARY_PATH"] = "\(dir):\(env["DYLD_LIBRARY_PATH"] ?? "")"
-            }
+            applyBundleEnv(&env)
             proc.environment = env
 
             try proc.run()
@@ -334,12 +335,8 @@ class WhisperTranscriber: ObservableObject {
         }
         proc.arguments = args
 
-        // Point backend search to bundled dylibs/plugins when running from app bundle
         var env = ProcessInfo.processInfo.environment
-        if let dir = execDir {
-            env["GGML_BACKEND_PATH"] = dir
-            env["DYLD_LIBRARY_PATH"] = "\(dir):\(env["DYLD_LIBRARY_PATH"] ?? "")"
-        }
+        applyBundleEnv(&env)
         proc.environment = env
 
         let outPipe = Pipe()
@@ -351,6 +348,10 @@ class WhisperTranscriber: ObservableObject {
         proc.waitUntilExit()
 
         let raw = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let errRaw = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        print("=== whisper stdout ===\n\(raw)")
+        print("=== whisper stderr ===\n\(errRaw)")
+
         // Filter any residual timestamp lines like [HH:MM:SS.mmm --> ...]
         let lines = raw.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -416,6 +417,10 @@ class WhisperTranscriber: ObservableObject {
         proc.waitUntilExit()
 
         let raw = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let errRaw2 = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        print("=== whisper stdout (URL) ===\n\(raw)")
+        print("=== whisper stderr (URL) ===\n\(errRaw2)")
+
         let lines = raw.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.hasPrefix("[") && !$0.isEmpty }

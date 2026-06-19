@@ -146,36 +146,52 @@ if [ "$DEV_MODE" = false ]; then
     if [ -n "$WHISPER_CLI_SRC" ]; then
         cp "$WHISPER_CLI_SRC" "$MACOS_DIR/whisper-cli"
 
+        # 自动检测 Homebrew prefix（Intel: /usr/local，Apple Silicon: /opt/homebrew）
+        BREW_PREFIX=$(brew --prefix 2>/dev/null || echo "/opt/homebrew")
+
         # libwhisper
-        WHISPER_VER=$(ls /opt/homebrew/Cellar/whisper-cpp/ 2>/dev/null | head -1)
-        WHISPER_LIB="/opt/homebrew/Cellar/whisper-cpp/$WHISPER_VER/lib/libwhisper.1.dylib"
-        [ -f "$WHISPER_LIB" ] && cp "$WHISPER_LIB" "$MACOS_DIR/libwhisper.1.dylib"
+        WHISPER_VER=$(ls "$BREW_PREFIX/Cellar/whisper-cpp/" 2>/dev/null | head -1)
+        WHISPER_LIB="$BREW_PREFIX/Cellar/whisper-cpp/$WHISPER_VER/lib/libwhisper.1.dylib"
+        if [ -f "$WHISPER_LIB" ]; then
+            cp "$WHISPER_LIB" "$MACOS_DIR/libwhisper.1.dylib"
+        else
+            echo "  ⚠️  libwhisper.1.dylib not found at $WHISPER_LIB"
+        fi
 
         # ggml core dylibs
-        GGML_LIB_DIR="/opt/homebrew/opt/ggml/lib"
+        GGML_LIB_DIR="$BREW_PREFIX/opt/ggml/lib"
         for lib in libggml.0.dylib libggml-base.0.dylib; do
-            [ -f "$GGML_LIB_DIR/$lib" ] && cp "$GGML_LIB_DIR/$lib" "$MACOS_DIR/$lib"
+            if [ -f "$GGML_LIB_DIR/$lib" ]; then
+                cp "$GGML_LIB_DIR/$lib" "$MACOS_DIR/$lib"
+            else
+                echo "  ⚠️  $lib not found at $GGML_LIB_DIR/$lib"
+            fi
         done
 
-        # ggml backend plugins (.so) — all CPU variants for cross-machine compat
-        GGML_LIBEXEC="/opt/homebrew/opt/ggml/libexec"
+        # ggml backend plugins (.so)
+        GGML_LIBEXEC="$BREW_PREFIX/opt/ggml/libexec"
         [ -d "$GGML_LIBEXEC" ] && cp "$GGML_LIBEXEC"/libggml-*.so "$MACOS_DIR/" 2>/dev/null || true
 
         # Fix rpath on whisper-cli
         install_name_tool -add_rpath "@executable_path" "$MACOS_DIR/whisper-cli" 2>/dev/null || true
-        install_name_tool \
-            -change "/opt/homebrew/opt/ggml/lib/libggml.0.dylib"      "@rpath/libggml.0.dylib" \
-            -change "/opt/homebrew/opt/ggml/lib/libggml-base.0.dylib" "@rpath/libggml-base.0.dylib" \
-            "$MACOS_DIR/whisper-cli" 2>/dev/null || true
+        # 修正 whisper-cli 里对 ggml dylib 的绝对路径引用（兼容两种 prefix）
+        for old_prefix in "/opt/homebrew" "/usr/local"; do
+            install_name_tool \
+                -change "$old_prefix/opt/ggml/lib/libggml.0.dylib"      "@rpath/libggml.0.dylib" \
+                -change "$old_prefix/opt/ggml/lib/libggml-base.0.dylib" "@rpath/libggml-base.0.dylib" \
+                "$MACOS_DIR/whisper-cli" 2>/dev/null || true
+        done
 
         # Fix rpath on libwhisper
         if [ -f "$MACOS_DIR/libwhisper.1.dylib" ]; then
             install_name_tool -id "@rpath/libwhisper.1.dylib" "$MACOS_DIR/libwhisper.1.dylib" 2>/dev/null || true
             install_name_tool -add_rpath "@loader_path" "$MACOS_DIR/libwhisper.1.dylib" 2>/dev/null || true
-            install_name_tool \
-                -change "/opt/homebrew/opt/ggml/lib/libggml.0.dylib"      "@loader_path/libggml.0.dylib" \
-                -change "/opt/homebrew/opt/ggml/lib/libggml-base.0.dylib" "@loader_path/libggml-base.0.dylib" \
-                "$MACOS_DIR/libwhisper.1.dylib" 2>/dev/null || true
+            for old_prefix in "/opt/homebrew" "/usr/local"; do
+                install_name_tool \
+                    -change "$old_prefix/opt/ggml/lib/libggml.0.dylib"      "@loader_path/libggml.0.dylib" \
+                    -change "$old_prefix/opt/ggml/lib/libggml-base.0.dylib" "@loader_path/libggml-base.0.dylib" \
+                    "$MACOS_DIR/libwhisper.1.dylib" 2>/dev/null || true
+            done
         fi
 
         # Fix rpath on libggml

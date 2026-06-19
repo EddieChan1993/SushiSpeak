@@ -266,7 +266,7 @@ struct ContentView: View {
 
                 Button { hideTimer.toggle() } label: {
                     Image(systemName: hideTimer ? "eye.slash" : "eye")
-                        .foregroundStyle(eyeHovered ? Color.primary : Color.tertiary)
+                        .foregroundStyle(eyeHovered ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
                         .scaleEffect(eyeHovered ? 1.15 : 1.0)
                         .animation(.spring(response: 0.15), value: eyeHovered)
                         .font(.system(size: 13))

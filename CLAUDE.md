@@ -185,6 +185,13 @@ Rule: if the bundling works, change only what's strictly necessary. The `.so` fi
 
 ## 变更记录
 
+### 2026-06-19 (3)
+- 🐛 修复：build.sh dylib 路径写死 `/opt/homebrew` 导致 Intel Mac（`/usr/local`）复制失败，改为 `brew --prefix` 自动检测
+- 🐛 修复：`applyBundleEnv` 在 `Task.detached` 闭包中需要显式 `self.`，加 `[self] in` 捕获
+- 🐛 修复：`eyeHovered` 按钮 `Color.tertiary` 类型不匹配，改为 `AnyShapeStyle`
+- ♻️ 优化：只有 bundle 内存在 `libwhisper.1.dylib` 时才注入 `DYLD_LIBRARY_PATH`，避免干扰系统 whisper-cli
+- 🆕 新增：build.sh rpath 修正同时处理两种 prefix，兼容 Intel/Apple Silicon
+
 ### 2026-06-19 (2)
 - 🆕 新增：全部删除改为垃圾桶图标 + "全部删除"文字，hover 变红 + 放大动画
 - ♻️ 优化：所有 `.plain` 按钮统一补全 hover 交互效果（xmark、眼睛、PlayerBar 播放、音量）
