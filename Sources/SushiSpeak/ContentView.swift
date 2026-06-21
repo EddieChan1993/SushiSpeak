@@ -236,7 +236,7 @@ struct ContentView: View {
                 ProgressView().controlSize(.small).help("正在验证模型…")
             } else {
                 Button { importModelFile() } label: {
-                    Image(systemName: "folder.badge.plus")
+                    Image(systemName: whisperModelFileName == nil ? "folder.badge.plus" : "arrow.triangle.2.circlepath")
                         .foregroundStyle(importHovered ? Color.accentColor : Color.secondary)
                         .scaleEffect(importHovered ? 1.15 : 1.0)
                         .animation(.spring(response: 0.15), value: importHovered)
@@ -245,6 +245,7 @@ struct ContentView: View {
                 .focusable(false)
                 .help(whisperModelFileName == nil ? "选择 Whisper 模型文件（任意 .bin）" : "更换模型")
                 .onHover { importHovered = $0 }
+
             }
         }
         .alert("导入失败", isPresented: $showImportError) {
