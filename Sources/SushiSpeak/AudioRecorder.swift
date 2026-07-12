@@ -242,7 +242,8 @@ class AudioRecorder: NSObject, ObservableObject {
             let dur = CMTimeGetSeconds(cmDuration)
             result.append(Recording(id: UUID(), url: url, date: date, duration: max(dur, 0)))
         }
-        let sorted = result.sorted { $0.date > $1.date }
+        let oneYearAgo = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
+        let sorted = result.filter { $0.date >= oneYearAgo }.sorted { $0.date > $1.date }
         await MainActor.run { recordings = sorted }
     }
 }
